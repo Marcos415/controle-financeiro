@@ -34,10 +34,23 @@ except Exception as e:
     st.stop()
 
 # ==========================================================
-# FUNÇÕES DE MANIPULAÇÃO DE DADOS
+# FUNÇÕES DE MANIPULAÇÃO DE DADOS DINÂMICAS
 # ==========================================================
+def obter_posicao_coluna_status():
+    """Identifica dinamicamente em qual coluna da planilha o 'Status' está localizado"""
+    try:
+        cabecalho = aba.row_values(1)
+        if "Status" in cabecalho:
+            return cabecalho.index("Status") + 1
+        else:
+            # Se não existir a coluna Status no cabeçalho, adiciona na última posição
+            pos = len(cabecalho) + 1
+            aba.update_cell(1, pos, "Status")
+            return pos
+    except Exception:
+        return 6
+
 def carregar_dados():
-    # Força a busca atualizada sem usar cache
     dados = aba.get_all_records()
     if len(dados) == 0:
         return pd.DataFrame(
@@ -46,46 +59,49 @@ def carregar_dados():
 
     df = pd.DataFrame(dados)
     
-    # Mapeamento estrito do Status
+    # Tratamento rígido do campo Status
     if "Status" not in df.columns:
         df["Status"] = "Fechado"
     else:
         df["Status"] = df["Status"].astype(str).str.strip()
-        # Mapeia compatibilidades mantendo 'Aberto' intacto
         df["Status"] = df["Status"].replace({
             "Pago": "Fechado", 
             "Pendente": "Aberto",
             "": "Fechado",
-            "nan": "Fechado"
+            "nan": "Fechado",
+            "None": "Fechado"
         })
-        # Qualquer valor diferente de 'Aberto' vira 'Fechado'
         df["Status"] = df["Status"].apply(lambda x: "Aberto" if x == "Aberto" else "Fechado")
 
     df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
     df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0)
     df = df.dropna(subset=["Data"])
     
-    # Índice real da linha na planilha Google Sheets (linha 1 é o cabeçalho)
+    # Armazena o número da linha física no Google Sheets
     df["_linha_sheet"] = df.index + 2
     return df
 
 def salvar_transacao(data, descricao, categoria, tipo, valor, status_conta):
-    valor_float = float(valor)
-    val_status = str(status_conta).strip()
+    col_status_idx = obter_posicao_coluna_status()
     
-    aba.append_row([
-        str(data),
-        str(descricao),
-        str(categoria),
-        str(tipo),
-        valor_float,
-        val_status
-    ])
+    # Garante que o cabeçalho tem todas as colunas alinhadas
+    cabecalho = aba.row_values(1)
+    
+    # Prepara a linha base
+    nova_linha = [str(data), str(descricao), str(categoria), str(tipo), float(valor)]
+    
+    # Ajusta o posicionamento do status conforme a coluna detectada
+    while len(nova_linha) < col_status_idx - 1:
+        nova_linha.append("")
+    nova_linha.insert(col_status_idx - 1, str(status_conta))
+    
+    aba.append_row(nova_linha)
 
 def alternar_status_transacao(linha_sheet, status_atual):
+    col_status_idx = obter_posicao_coluna_status()
     novo_status = "Fechado" if status_atual == "Aberto" else "Aberto"
     try:
-        aba.update_cell(int(linha_sheet), 6, novo_status)
+        aba.update_cell(int(linha_sheet), col_status_idx, novo_status)
     except Exception as e:
         st.error(f"Erro ao atualizar status na planilha: {e}")
 
@@ -211,7 +227,7 @@ if st.button("Salvar Transação"):
             valor=valor_in,
             status_conta=status_in
         )
-        st.success(f"Transação salva como '{status_in}' com sucesso!")
+        st.success(f"Transação salva com status '{status_in}' com sucesso!")
         st.rerun()
     else:
         st.warning("Preencha a descrição e um valor maior que zero.")
