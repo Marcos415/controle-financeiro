@@ -45,34 +45,34 @@ def carregar_dados():
 
     df = pd.DataFrame(dados)
     
-    # Padroniza coluna Status (Aberto vs Fechado)
+    # Tratamento correto da coluna Status sem sobrescrever Aberto
     if "Status" not in df.columns:
         df["Status"] = "Fechado"
     else:
-        # Mapeia antigos 'Pago/Pendente' para 'Fechado/Aberto' se existirem
-        df["Status"] = df["Status"].replace({"Pago": "Fechado", "Pendente": "Aberto"}).fillna("Fechado")
-        df.loc[df["Status"] == "", "Status"] = "Fechado"
+        df["Status"] = df["Status"].astype(str).str.strip()
+        df["Status"] = df["Status"].replace({"Pago": "Fechado", "Pendente": "Aberto"})
+        df["Status"] = df["Status"].apply(lambda x: x if x in ["Aberto", "Fechado"] else "Fechado")
 
     df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
     df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0)
     df = df.dropna(subset=["Data"])
     
-    # Cria ID temporário referente à linha real no Google Sheets (1ª linha de dados = linha 2)
+    # Guarda o número exato da linha no Google Sheets
     df["_linha_sheet"] = df.index + 2
     return df
 
-def salvar_transacao(data, descricao, categoria, tipo, valor, status="Fechado"):
+def salvar_transacao(data, descricao, categoria, tipo, valor, status):
     aba.append_row([
         str(data),
         descricao,
         categoria,
         tipo,
-        valor,
-        status
+        float(valor),
+        str(status)
     ])
 
 def alternar_status_transacao(linha_sheet, status_atual):
-    """Muda o Status exatamente na linha correspondente do Google Sheets"""
+    """Muda o Status na linha correspondente da planilha no Google Sheets"""
     novo_status = "Fechado" if status_atual == "Aberto" else "Aberto"
     try:
         aba.update_cell(linha_sheet, 6, novo_status)
@@ -134,11 +134,11 @@ def gerar_pdf_relatorio(df_relatorio, titulo_periodo, entradas_tot, saidas_tot, 
                 <div class="card-value" style="color: #00c853;">R$ {entradas_tot:,.2f}</div>
             </div>
             <div class="card" style="margin-left: 2%;">
-                <div class="card-title">Total Saídas (Realizadas)</div>
+                <div class="card-title">Total Saídas (Fechadas)</div>
                 <div class="card-value" style="color: #ff2b2b;">R$ {saidas_tot:,.2f}</div>
             </div>
             <div class="card" style="margin-left: 2%;">
-                <div class="card-title">Saldo Realizado</div>
+                <div class="card-title">Saldo Efetivado</div>
                 <div class="card-value" style="color: {cor_saldo};">R$ {saldo_tot:,.2f}</div>
             </div>
         </div>
@@ -193,7 +193,14 @@ with st.expander("➕ Nova Transação", expanded=True):
 
 if st.button("Salvar Transação"):
     if descricao and valor > 0:
-        salvar_transacao(data, descricao, categoria, tipo, valor, status_inicial)
+        salvar_transacao(
+            data=data,
+            descricao=descricao,
+            categoria=categoria,
+            tipo=tipo,
+            valor=valor,
+            status=status_inicial
+        )
         st.success("Transação salva com sucesso!")
         st.rerun()
     else:
@@ -343,7 +350,6 @@ if not df.empty:
                 cols[5].markdown("⏳ **Em Aberto**")
                 lbl_btn = "Fechar Conta"
             
-            # Executa a ação usando a linha real mapeada da planilha
             if cols[6].button(lbl_btn, key=f"btn_sheet_{row['_linha_sheet']}"):
                 alternar_status_transacao(row["_linha_sheet"], status_atual)
                 st.rerun()
