@@ -37,6 +37,7 @@ except Exception as e:
 # FUNÇÕES DE MANIPULAÇÃO DE DADOS
 # ==========================================================
 def carregar_dados():
+    # Força a busca atualizada sem usar cache
     dados = aba.get_all_records()
     if len(dados) == 0:
         return pd.DataFrame(
@@ -45,37 +46,46 @@ def carregar_dados():
 
     df = pd.DataFrame(dados)
     
-    # Tratamento correto da coluna Status sem sobrescrever Aberto
+    # Mapeamento estrito do Status
     if "Status" not in df.columns:
         df["Status"] = "Fechado"
     else:
         df["Status"] = df["Status"].astype(str).str.strip()
-        df["Status"] = df["Status"].replace({"Pago": "Fechado", "Pendente": "Aberto"})
-        df["Status"] = df["Status"].apply(lambda x: x if x in ["Aberto", "Fechado"] else "Fechado")
+        # Mapeia compatibilidades mantendo 'Aberto' intacto
+        df["Status"] = df["Status"].replace({
+            "Pago": "Fechado", 
+            "Pendente": "Aberto",
+            "": "Fechado",
+            "nan": "Fechado"
+        })
+        # Qualquer valor diferente de 'Aberto' vira 'Fechado'
+        df["Status"] = df["Status"].apply(lambda x: "Aberto" if x == "Aberto" else "Fechado")
 
     df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
     df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0)
     df = df.dropna(subset=["Data"])
     
-    # Guarda o número exato da linha no Google Sheets
+    # Índice real da linha na planilha Google Sheets (linha 1 é o cabeçalho)
     df["_linha_sheet"] = df.index + 2
     return df
 
-def salvar_transacao(data, descricao, categoria, tipo, valor, status):
+def salvar_transacao(data, descricao, categoria, tipo, valor, status_conta):
+    valor_float = float(valor)
+    val_status = str(status_conta).strip()
+    
     aba.append_row([
         str(data),
-        descricao,
-        categoria,
-        tipo,
-        float(valor),
-        str(status)
+        str(descricao),
+        str(categoria),
+        str(tipo),
+        valor_float,
+        val_status
     ])
 
 def alternar_status_transacao(linha_sheet, status_atual):
-    """Muda o Status na linha correspondente da planilha no Google Sheets"""
     novo_status = "Fechado" if status_atual == "Aberto" else "Aberto"
     try:
-        aba.update_cell(linha_sheet, 6, novo_status)
+        aba.update_cell(int(linha_sheet), 6, novo_status)
     except Exception as e:
         st.error(f"Erro ao atualizar status na planilha: {e}")
 
@@ -179,29 +189,29 @@ st.title("💰 Controle Financeiro")
 with st.expander("➕ Nova Transação", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
-        data = st.date_input("Data")
-        descricao = st.text_input("Descrição")
-        categoria = st.text_input("Categoria")
+        data_in = st.date_input("Data")
+        desc_in = st.text_input("Descrição")
+        cat_in = st.text_input("Categoria")
     with col2:
-        tipo = st.selectbox("Tipo", ["Entrada", "Saída"])
-        valor = st.number_input("Valor", min_value=0.0, format="%.2f")
-        status_inicial = st.selectbox(
+        tipo_in = st.selectbox("Tipo", ["Entrada", "Saída"])
+        valor_in = st.number_input("Valor", min_value=0.0, format="%.2f")
+        status_in = st.selectbox(
             "Status da Conta", 
-            ["Fechado", "Aberto"], 
+            ["Aberto", "Fechado"], 
             help="'Aberto' não desconta/soma no saldo até ser Fechado."
         )
 
 if st.button("Salvar Transação"):
-    if descricao and valor > 0:
+    if desc_in and valor_in > 0:
         salvar_transacao(
-            data=data,
-            descricao=descricao,
-            categoria=categoria,
-            tipo=tipo,
-            valor=valor,
-            status=status_inicial
+            data=data_in,
+            descricao=desc_in,
+            categoria=cat_in,
+            tipo=tipo_in,
+            valor=valor_in,
+            status_conta=status_in
         )
-        st.success("Transação salva com sucesso!")
+        st.success(f"Transação salva como '{status_in}' com sucesso!")
         st.rerun()
     else:
         st.warning("Preencha a descrição e um valor maior que zero.")
@@ -210,7 +220,6 @@ if st.button("Salvar Transação"):
 df = carregar_dados()
 
 if not df.empty:
-    # --- FILTROS DE EXIBIÇÃO ---
     st.subheader("Filtros")
     anos_disponiveis = sorted(df["Data"].dt.year.unique(), reverse=True)
     
@@ -231,7 +240,7 @@ if not df.empty:
     else:
         titulo_periodo = f"Ano de {ano}"
 
-    # CÁLCULO DE SALDO: Apenas transações com Status 'Fechado' afetam o saldo!
+    # CÁLCULO DE SALDO: Apenas transações 'Fechado' afetam o saldo efetivado
     df_fechados = df_filtrado[df_filtrado["Status"] == "Fechado"]
     df_abertos = df_filtrado[df_filtrado["Status"] == "Aberto"]
 
@@ -282,8 +291,6 @@ if not df.empty:
         )
         grafico.update_xaxes(type='category')
         st.plotly_chart(grafico, use_container_width=True)
-    else:
-        st.info("Nenhuma transação encontrada para o período selecionado.")
 
     # --- HISTÓRICO E EXPORTAÇÃO DE PDF ---
     st.subheader("📄 Histórico de Lançamentos")
@@ -341,7 +348,7 @@ if not df.empty:
             
             cols[4].write(f"R$ {row['Valor']:,.2f}")
             
-            status_atual = row.get("Status", "Fechado")
+            status_atual = str(row["Status"]).strip()
             
             if status_atual == "Fechado":
                 cols[5].markdown("✅ **Fechado**")
