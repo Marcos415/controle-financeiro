@@ -8,7 +8,7 @@ from weasyprint import HTML
 import json
 
 # ==========================================================
-# CONFIGURAÇÃO GOOGLE SHEETS (SUPORTE LOCAL E NUVEM)
+# CONFIGURAÇÃO GOOGLE SHEETS
 # ==========================================================
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -17,7 +17,6 @@ SCOPES = [
 
 @st.cache_resource
 def conectar_google_sheets():
-    """Conecta no Google Sheets usando Secrets (Nuvem) ou credentials.json (Local)"""
     if "gcp_service_account" in st.secrets:
         creds_dict = json.loads(st.secrets["gcp_service_account"])
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
@@ -46,18 +45,23 @@ def carregar_dados():
 
     df = pd.DataFrame(dados)
     
-    # Retrocompatibilidade: se a coluna Status não existir, preenche como 'Pago'
+    # Padroniza coluna Status (Aberto vs Fechado)
     if "Status" not in df.columns:
-        df["Status"] = "Pago"
+        df["Status"] = "Fechado"
     else:
-        df["Status"] = df["Status"].fillna("Pago").replace("", "Pago")
+        # Mapeia antigos 'Pago/Pendente' para 'Fechado/Aberto' se existirem
+        df["Status"] = df["Status"].replace({"Pago": "Fechado", "Pendente": "Aberto"}).fillna("Fechado")
+        df.loc[df["Status"] == "", "Status"] = "Fechado"
 
     df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
     df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0)
     df = df.dropna(subset=["Data"])
+    
+    # Cria ID temporário referente à linha real no Google Sheets (1ª linha de dados = linha 2)
+    df["_linha_sheet"] = df.index + 2
     return df
 
-def salvar_transacao(data, descricao, categoria, tipo, valor, status="Pago"):
+def salvar_transacao(data, descricao, categoria, tipo, valor, status="Fechado"):
     aba.append_row([
         str(data),
         descricao,
@@ -67,32 +71,21 @@ def salvar_transacao(data, descricao, categoria, tipo, valor, status="Pago"):
         status
     ])
 
-def alternar_status_transacao(df, index_linha):
-    """Atualiza o Status da transação no Google Sheets (Linha da planilha = index_linha + 2)"""
-    status_atual = df.loc[index_linha, "Status"]
-    novo_status = "Pago" if status_atual == "Pendente" else "Pendente"
-    
-    linha_sheet = index_linha + 2
+def alternar_status_transacao(linha_sheet, status_atual):
+    """Muda o Status exatamente na linha correspondente do Google Sheets"""
+    novo_status = "Fechado" if status_atual == "Aberto" else "Aberto"
     try:
         aba.update_cell(linha_sheet, 6, novo_status)
     except Exception as e:
         st.error(f"Erro ao atualizar status na planilha: {e}")
 
-def colorir_tipo(val):
-    if val == "Saída":
-        return 'color: #ff2b2b; font-weight: bold;'
-    elif val == "Entrada":
-        return 'color: #00c853; font-weight: bold;'
-    return ''
-
 def gerar_pdf_relatorio(df_relatorio, titulo_periodo, entradas_tot, saidas_tot, saldo_tot):
-    """Gera o arquivo PDF do relatório financeiro"""
     linhas_html = ""
     for _, row in df_relatorio.iterrows():
         data_str = row["Data"].strftime('%d/%m/%Y')
         cor_tipo = "#ff2b2b" if row["Tipo"] == "Saída" else "#00c853"
-        status_txt = row.get("Status", "Pago")
-        cor_status = "#00c853" if status_txt == "Pago" else "#ff9800"
+        status_txt = row.get("Status", "Fechado")
+        cor_status = "#00c853" if status_txt == "Fechado" else "#ff9800"
         
         linhas_html += f"""
         <tr>
@@ -137,15 +130,15 @@ def gerar_pdf_relatorio(df_relatorio, titulo_periodo, entradas_tot, saidas_tot, 
 
         <div class="cards">
             <div class="card">
-                <div class="card-title">Total Entradas</div>
+                <div class="card-title">Total Entradas (Realizadas)</div>
                 <div class="card-value" style="color: #00c853;">R$ {entradas_tot:,.2f}</div>
             </div>
             <div class="card" style="margin-left: 2%;">
-                <div class="card-title">Total Saídas</div>
+                <div class="card-title">Total Saídas (Realizadas)</div>
                 <div class="card-value" style="color: #ff2b2b;">R$ {saidas_tot:,.2f}</div>
             </div>
             <div class="card" style="margin-left: 2%;">
-                <div class="card-title">Saldo do Período</div>
+                <div class="card-title">Saldo Realizado</div>
                 <div class="card-value" style="color: {cor_saldo};">R$ {saldo_tot:,.2f}</div>
             </div>
         </div>
@@ -192,7 +185,11 @@ with st.expander("➕ Nova Transação", expanded=True):
     with col2:
         tipo = st.selectbox("Tipo", ["Entrada", "Saída"])
         valor = st.number_input("Valor", min_value=0.0, format="%.2f")
-        status_inicial = st.selectbox("Status de Pagamento", ["Pago", "Pendente"], help="Use 'Pendente' para contas futuras ou cartão parcelado.")
+        status_inicial = st.selectbox(
+            "Status da Conta", 
+            ["Fechado", "Aberto"], 
+            help="'Aberto' não desconta/soma no saldo até ser Fechado."
+        )
 
 if st.button("Salvar Transação"):
     if descricao and valor > 0:
@@ -202,25 +199,10 @@ if st.button("Salvar Transação"):
     else:
         st.warning("Preencha a descrição e um valor maior que zero.")
 
-# --- DASHBOARD E FILTROS ---
+# --- CARREGAMENTO E FILTROS ---
 df = carregar_dados()
 
 if not df.empty:
-    entradas = df[df["Tipo"] == "Entrada"]["Valor"].sum()
-    saidas = df[df["Tipo"] == "Saída"]["Valor"].sum()
-    saldo = entradas - saidas
-
-    st.subheader("📊 Dashboard Geral")
-    c1, c2, c3 = st.columns(3)
-
-    c1.metric("Entradas", f"R$ {entradas:,.2f}")
-    c2.metric("Saídas (Despesas)", f"R$ {saidas:,.2f}")
-
-    if saldo >= 0:
-        c3.success(f"Saldo Atual: R$ {saldo:,.2f}")
-    else:
-        c3.error(f"Saldo Atual: R$ {saldo:,.2f}")
-
     # --- FILTROS DE EXIBIÇÃO ---
     st.subheader("Filtros")
     anos_disponiveis = sorted(df["Data"].dt.year.unique(), reverse=True)
@@ -235,26 +217,50 @@ if not df.empty:
 
     df_filtrado = df[df["Data"].dt.year == ano].copy()
 
-    cores_mapa = {
-        "Entrada": "#00c853",
-        "Saída": "#ff2b2b"
-    }
+    if mes != "Todos":
+        numero_mes = meses.index(mes)
+        df_filtrado = df_filtrado[df_filtrado["Data"].dt.month == numero_mes]
+        titulo_periodo = f"{mes} / {ano}"
+    else:
+        titulo_periodo = f"Ano de {ano}"
+
+    # CÁLCULO DE SALDO: Apenas transações com Status 'Fechado' afetam o saldo!
+    df_fechados = df_filtrado[df_filtrado["Status"] == "Fechado"]
+    df_abertos = df_filtrado[df_filtrado["Status"] == "Aberto"]
+
+    entradas_realizadas = df_fechados[df_fechados["Tipo"] == "Entrada"]["Valor"].sum()
+    saidas_realizadas = df_fechados[df_fechados["Tipo"] == "Saída"]["Valor"].sum()
+    saldo_realizado = entradas_realizadas - saidas_realizadas
+
+    saidas_pendentes = df_abertos[df_abertos["Tipo"] == "Saída"]["Valor"].sum()
+
+    # --- DASHBOARD ---
+    st.subheader("📊 Dashboard do Período")
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("Entradas (Realizadas)", f"R$ {entradas_realizadas:,.2f}")
+    c2.metric("Saídas (Fechadas)", f"R$ {saidas_realizadas:,.2f}")
+    
+    if saldo_realizado >= 0:
+        c3.success(f"Saldo Efetivado: R$ {saldo_realizado:,.2f}")
+    else:
+        c3.error(f"Saldo Efetivado: R$ {saldo_realizado:,.2f}")
+
+    c4.warning(f"Contas em Aberto: R$ {saidas_pendentes:,.2f}")
 
     # --- GRÁFICO DINÂMICO ---
+    cores_mapa = {"Entrada": "#00c853", "Saída": "#ff2b2b"}
+    
     if mes == "Todos":
         df_filtrado["Eixo_X"] = df_filtrado["Data"].dt.to_period("M").astype(str)
         resumo = df_filtrado.groupby(["Eixo_X", "Tipo"])["Valor"].sum().reset_index()
         titulo_grafico = f"Entradas vs Saídas por Mês ({ano})"
         label_x = "Mês"
-        titulo_periodo = f"Ano de {ano}"
     else:
-        numero_mes = meses.index(mes)
-        df_filtrado = df_filtrado[df_filtrado["Data"].dt.month == numero_mes]
         df_filtrado["Eixo_X"] = df_filtrado["Data"].dt.strftime('%d/%m')
         resumo = df_filtrado.groupby(["Eixo_X", "Tipo"])["Valor"].sum().reset_index()
         titulo_grafico = f"Entradas vs Saídas por Dia - {mes}/{ano}"
         label_x = "Dia"
-        titulo_periodo = f"{mes} / {ano}"
 
     if not resumo.empty:
         grafico = px.bar(
@@ -273,7 +279,7 @@ if not df.empty:
         st.info("Nenhuma transação encontrada para o período selecionado.")
 
     # --- HISTÓRICO E EXPORTAÇÃO DE PDF ---
-    st.subheader("📄 Histórico e Baixas de Lançamentos")
+    st.subheader("📄 Histórico de Lançamentos")
     
     col_search, col_pdf = st.columns([3, 1])
     with col_search:
@@ -284,16 +290,12 @@ if not df.empty:
             df_filtrado["Descricao"].str.contains(busca, case=False, na=False)
         ]
 
-    ent_f = df_filtrado[df_filtrado["Tipo"] == "Entrada"]["Valor"].sum()
-    sai_f = df_filtrado[df_filtrado["Tipo"] == "Saída"]["Valor"].sum()
-    sal_f = ent_f - sai_f
-
     pdf_bytes = gerar_pdf_relatorio(
         df_filtrado.sort_values(by="Data"), 
         titulo_periodo, 
-        ent_f, 
-        sai_f, 
-        sal_f
+        entradas_realizadas, 
+        saidas_realizadas, 
+        saldo_realizado
     )
 
     with col_pdf:
@@ -306,11 +308,10 @@ if not df.empty:
             use_container_width=True
         )
 
-    # --- RENDERIZAÇÃO DA TABELA INTERATIVA DE BAIXA ---
+    # --- TABELA INTERATIVA DE AÇÃO ---
     df_exibicao = df_filtrado.sort_values(by="Data", ascending=False).copy()
     
     if not df_exibicao.empty:
-        # Cabeçalho da Tabela
         c_hdr = st.columns([1.5, 2.5, 2, 1.5, 1.5, 1.5, 2])
         c_hdr[0].markdown("**Data**")
         c_hdr[1].markdown("**Descrição**")
@@ -321,8 +322,7 @@ if not df.empty:
         c_hdr[6].markdown("**Ação**")
         st.divider()
 
-        # Renderização individual por linha com botão de ação
-        for idx, row in df_exibicao.iterrows():
+        for _, row in df_exibicao.iterrows():
             cols = st.columns([1.5, 2.5, 2, 1.5, 1.5, 1.5, 2])
             
             cols[0].write(row["Data"].strftime('%d/%m/%Y'))
@@ -334,16 +334,18 @@ if not df.empty:
             
             cols[4].write(f"R$ {row['Valor']:,.2f}")
             
-            status_atual = row.get("Status", "Pago")
-            if status_atual == "Pago":
-                cols[5].markdown("✅ **Pago**")
-                lbl_btn = "Marcar Pendente"
-            else:
-                cols[5].markdown("⏳ **Pendente**")
-                lbl_btn = "Dar Baixa"
+            status_atual = row.get("Status", "Fechado")
             
-            if cols[6].button(lbl_btn, key=f"btn_baixa_{idx}"):
-                alternar_status_transacao(df, idx)
+            if status_atual == "Fechado":
+                cols[5].markdown("✅ **Fechado**")
+                lbl_btn = "Abrir Conta"
+            else:
+                cols[5].markdown("⏳ **Em Aberto**")
+                lbl_btn = "Fechar Conta"
+            
+            # Executa a ação usando a linha real mapeada da planilha
+            if cols[6].button(lbl_btn, key=f"btn_sheet_{row['_linha_sheet']}"):
+                alternar_status_transacao(row["_linha_sheet"], status_atual)
                 st.rerun()
     else:
         st.info("Nenhuma transação encontrada no período filtrado.")
