@@ -19,11 +19,9 @@ SCOPES = [
 def conectar_google_sheets():
     """Conecta no Google Sheets usando Secrets (Nuvem) ou credentials.json (Local)"""
     if "gcp_service_account" in st.secrets:
-        # Puxa das Secrets do Streamlit Cloud
         creds_dict = json.loads(st.secrets["gcp_service_account"])
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     else:
-        # Puxa do arquivo local
         creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
     
     client = gspread.authorize(creds)
@@ -43,23 +41,42 @@ def carregar_dados():
     dados = aba.get_all_records()
     if len(dados) == 0:
         return pd.DataFrame(
-            columns=["Data", "Descricao", "Categoria", "Tipo", "Valor"]
+            columns=["Data", "Descricao", "Categoria", "Tipo", "Valor", "Status"]
         )
 
     df = pd.DataFrame(dados)
+    
+    # Retrocompatibilidade: se a coluna Status não existir, preenche como 'Pago'
+    if "Status" not in df.columns:
+        df["Status"] = "Pago"
+    else:
+        df["Status"] = df["Status"].fillna("Pago").replace("", "Pago")
+
     df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
     df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0)
     df = df.dropna(subset=["Data"])
     return df
 
-def salvar_transacao(data, descricao, categoria, tipo, valor):
+def salvar_transacao(data, descricao, categoria, tipo, valor, status="Pago"):
     aba.append_row([
         str(data),
         descricao,
         categoria,
         tipo,
-        valor
+        valor,
+        status
     ])
+
+def alternar_status_transacao(df, index_linha):
+    """Atualiza o Status da transação no Google Sheets (Linha da planilha = index_linha + 2)"""
+    status_atual = df.loc[index_linha, "Status"]
+    novo_status = "Pago" if status_atual == "Pendente" else "Pendente"
+    
+    linha_sheet = index_linha + 2
+    try:
+        aba.update_cell(linha_sheet, 6, novo_status)
+    except Exception as e:
+        st.error(f"Erro ao atualizar status na planilha: {e}")
 
 def colorir_tipo(val):
     if val == "Saída":
@@ -74,12 +91,16 @@ def gerar_pdf_relatorio(df_relatorio, titulo_periodo, entradas_tot, saidas_tot, 
     for _, row in df_relatorio.iterrows():
         data_str = row["Data"].strftime('%d/%m/%Y')
         cor_tipo = "#ff2b2b" if row["Tipo"] == "Saída" else "#00c853"
+        status_txt = row.get("Status", "Pago")
+        cor_status = "#00c853" if status_txt == "Pago" else "#ff9800"
+        
         linhas_html += f"""
         <tr>
             <td>{data_str}</td>
             <td>{row["Descricao"]}</td>
             <td>{row["Categoria"]}</td>
             <td style="color: {cor_tipo}; font-weight: bold;">{row["Tipo"]}</td>
+            <td style="color: {cor_status}; font-weight: bold;">{status_txt}</td>
             <td style="text-align: right;">R$ {row["Valor"]:,.2f}</td>
         </tr>
         """
@@ -137,6 +158,7 @@ def gerar_pdf_relatorio(df_relatorio, titulo_periodo, entradas_tot, saidas_tot, 
                     <th>Descrição</th>
                     <th>Categoria</th>
                     <th>Tipo</th>
+                    <th>Status</th>
                     <th style="text-align: right;">Valor</th>
                 </tr>
             </thead>
@@ -170,10 +192,11 @@ with st.expander("➕ Nova Transação", expanded=True):
     with col2:
         tipo = st.selectbox("Tipo", ["Entrada", "Saída"])
         valor = st.number_input("Valor", min_value=0.0, format="%.2f")
+        status_inicial = st.selectbox("Status de Pagamento", ["Pago", "Pendente"], help="Use 'Pendente' para contas futuras ou cartão parcelado.")
 
 if st.button("Salvar Transação"):
     if descricao and valor > 0:
-        salvar_transacao(data, descricao, categoria, tipo, valor)
+        salvar_transacao(data, descricao, categoria, tipo, valor, status_inicial)
         st.success("Transação salva com sucesso!")
         st.rerun()
     else:
@@ -187,7 +210,7 @@ if not df.empty:
     saidas = df[df["Tipo"] == "Saída"]["Valor"].sum()
     saldo = entradas - saidas
 
-    st.subheader("📊 Dashboard")
+    st.subheader("📊 Dashboard Geral")
     c1, c2, c3 = st.columns(3)
 
     c1.metric("Entradas", f"R$ {entradas:,.2f}")
@@ -198,7 +221,7 @@ if not df.empty:
     else:
         c3.error(f"Saldo Atual: R$ {saldo:,.2f}")
 
-    # --- FILTROS ---
+    # --- FILTROS DE EXIBIÇÃO ---
     st.subheader("Filtros")
     anos_disponiveis = sorted(df["Data"].dt.year.unique(), reverse=True)
     
@@ -250,7 +273,7 @@ if not df.empty:
         st.info("Nenhuma transação encontrada para o período selecionado.")
 
     # --- HISTÓRICO E EXPORTAÇÃO DE PDF ---
-    st.subheader("📄 Histórico")
+    st.subheader("📄 Histórico e Baixas de Lançamentos")
     
     col_search, col_pdf = st.columns([3, 1])
     with col_search:
@@ -283,14 +306,46 @@ if not df.empty:
             use_container_width=True
         )
 
-    df_exibicao = df_filtrado.copy()
-    df_exibicao["Data"] = df_exibicao["Data"].dt.strftime('%d/%m/%Y')
+    # --- RENDERIZAÇÃO DA TABELA INTERATIVA DE BAIXA ---
+    df_exibicao = df_filtrado.sort_values(by="Data", ascending=False).copy()
+    
+    if not df_exibicao.empty:
+        # Cabeçalho da Tabela
+        c_hdr = st.columns([1.5, 2.5, 2, 1.5, 1.5, 1.5, 2])
+        c_hdr[0].markdown("**Data**")
+        c_hdr[1].markdown("**Descrição**")
+        c_hdr[2].markdown("**Categoria**")
+        c_hdr[3].markdown("**Tipo**")
+        c_hdr[4].markdown("**Valor**")
+        c_hdr[5].markdown("**Status**")
+        c_hdr[6].markdown("**Ação**")
+        st.divider()
 
-    st.dataframe(
-        df_exibicao[["Data", "Descricao", "Categoria", "Tipo", "Valor"]].style.map(
-            colorir_tipo, subset=["Tipo"]
-        ),
-        use_container_width=True
-    )
+        # Renderização individual por linha com botão de ação
+        for idx, row in df_exibicao.iterrows():
+            cols = st.columns([1.5, 2.5, 2, 1.5, 1.5, 1.5, 2])
+            
+            cols[0].write(row["Data"].strftime('%d/%m/%Y'))
+            cols[1].write(row["Descricao"])
+            cols[2].write(row["Categoria"])
+            
+            cor_tipo = "🔴 Saída" if row["Tipo"] == "Saída" else "🟢 Entrada"
+            cols[3].write(cor_tipo)
+            
+            cols[4].write(f"R$ {row['Valor']:,.2f}")
+            
+            status_atual = row.get("Status", "Pago")
+            if status_atual == "Pago":
+                cols[5].markdown("✅ **Pago**")
+                lbl_btn = "Marcar Pendente"
+            else:
+                cols[5].markdown("⏳ **Pendente**")
+                lbl_btn = "Dar Baixa"
+            
+            if cols[6].button(lbl_btn, key=f"btn_baixa_{idx}"):
+                alternar_status_transacao(df, idx)
+                st.rerun()
+    else:
+        st.info("Nenhuma transação encontrada no período filtrado.")
 else:
     st.info("Nenhuma transação cadastrada até o momento.")
