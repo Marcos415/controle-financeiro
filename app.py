@@ -63,7 +63,7 @@ st.title("💰 Controle Financeiro Integrado")
 # --- RESUMO PAINEL DE MÉTRICAS ---
 df_todos = carregar_dados()
 
-st.markdown("### 📊 Visão Geral do Caixa")
+st.markdown("### 📊 Visão Geral do Caixa (Geral)")
 if not df_todos.empty:
     total_entradas = df_todos[df_todos['tipo'] == 'Entrada']['valor'].sum()
     total_saidas = df_todos[df_todos['tipo'] == 'Saída']['valor'].sum()
@@ -84,10 +84,11 @@ else:
 st.divider()
 
 # --- NAVEGAÇÃO POR ABAS ---
-aba1, aba2, aba3 = st.tabs([
+aba1, aba2, aba3, aba4 = st.tabs([
     "➕ Lançamento Único", 
     "🔄 Lançamento Parcelado / Recorrente", 
-    "📋 Contas e Baixa de Pagamentos"
+    "📋 Contas e Baixa de Pagamentos",
+    "📅 Relatórios Mensais / Anuais"
 ])
 
 # -------------------------------------------------------------
@@ -187,12 +188,9 @@ with aba3:
     df_exibicao = carregar_dados()
     
     if not df_exibicao.empty:
-        # Seção de Ações Rápidas (Dar Baixa / Excluir / Mudar Status)
         st.subheader("⚡ Dar Baixa ou Alterar Status")
-        
         col_a1, col_a2, col_a3 = st.columns([4, 2, 2])
         
-        # Mapeia id e informações do lançamento para seleção
         opcoes_todas = {
             f"ID {row['id']} | {row['data']} | {row['descricao']} - R$ {row['valor']:.2f} [{row['status']}]": row['id']
             for _, row in df_exibicao.iterrows()
@@ -224,7 +222,6 @@ with aba3:
         st.divider()
         st.subheader("📊 Extrato de Contas")
 
-        # Filtros para a tabela
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             filtro_status = st.multiselect("Filtrar por Status", options=list(df_exibicao["status"].unique()), default=list(df_exibicao["status"].unique()))
@@ -236,7 +233,6 @@ with aba3:
             (df_exibicao["tipo"].isin(filtro_tipo))
         ]
 
-        # Tabela formatada e limpa
         st.dataframe(
             df_filtrado,
             column_config={
@@ -253,3 +249,111 @@ with aba3:
 
     else:
         st.info("Nenhum lançamento registrado até o momento.")
+
+# -------------------------------------------------------------
+# ABA 4: RELATÓRIOS MENSAIS E ANUAIS
+# -------------------------------------------------------------
+with aba4:
+    st.header("📅 Relatórios e Movimentação por Mês/Ano")
+    
+    df_relatorio = carregar_dados()
+    
+    if not df_relatorio.empty:
+        # Prepara colunas de data
+        df_relatorio['datetime'] = pd.to_datetime(df_relatorio['data'])
+        df_relatorio['Ano'] = df_relatorio['datetime'].dt.year
+        df_relatorio['Mês_Num'] = df_relatorio['datetime'].dt.month
+        
+        meses_pt = {
+            1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
+            5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
+            9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
+        }
+        df_relatorio['Mês_Nome'] = df_relatorio['Mês_Num'].map(meses_pt)
+        
+        # Filtros no topo da aba
+        col_r1, col_r2, col_r3 = st.columns(3)
+        
+        anos_disponiveis = sorted(df_relatorio['Ano'].unique(), reverse=True)
+        with col_r1:
+            ano_sel = st.selectbox("Selecione o Ano:", anos_disponiveis)
+            
+        with col_r2:
+            opcao_periodo = st.radio("Visão do Relatório:", ["Mensal", "Ano Todo (Acumulado)"], horizontal=True)
+            
+        with col_r3:
+            if opcao_periodo == "Mensal":
+                meses_do_ano = [meses_pt[m] for m in sorted(df_relatorio[df_relatorio['Ano'] == ano_sel]['Mês_Num'].unique())]
+                mes_sel_nome = st.selectbox("Selecione o Mês:", meses_do_ano)
+            else:
+                mes_sel_nome = "Todos"
+
+        # Filtragem do DataFrame conforme seleção
+        df_filtrado_periodo = df_relatorio[df_relatorio['Ano'] == ano_sel]
+        if opcao_periodo == "Mensal" and mes_sel_nome != "Todos":
+            df_filtrado_periodo = df_filtrado_periodo[df_filtrado_periodo['Mês_Nome'] == mes_sel_nome]
+
+        st.divider()
+
+        # Métricas do Período Selecionado
+        ent_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Entrada']['valor'].sum()
+        sai_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Saída']['valor'].sum()
+        saldo_m = ent_m - sai_m
+        aberto_m = df_filtrado_periodo[df_filtrado_periodo['status'] == 'Aberto']['valor'].sum()
+
+        st.subheader(f"📌 Resumo: {mes_sel_nome if opcao_periodo == 'Mensal' else 'Ano ' + str(ano_sel)}")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Entradas no Período", f"R$ {ent_m:,.2f}")
+        c2.metric("Saídas no Período", f"R$ {sai_m:,.2f}")
+        c3.metric("Saldo do Período", f"R$ {saldo_m:,.2f}")
+        c4.metric("A Vencer / Em Aberto", f"R$ {aberto_m:,.2f}")
+
+        # Gráficos
+        st.divider()
+        col_g1, col_g2 = st.columns(2)
+        
+        with col_g1:
+            st.subheader("📊 Entradas vs. Saídas")
+            df_totais_tipo = df_filtrado_periodo.groupby('tipo')['valor'].sum().reset_index()
+            if not df_totais_tipo.empty:
+                st.bar_chart(df_totais_tipo.set_index('tipo'))
+            else:
+                st.info("Sem dados suficientes para o gráfico.")
+
+        with col_g2:
+            st.subheader("🏷️ Saídas por Categoria")
+            df_saidas_cat = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Saída'].groupby('categoria')['valor'].sum().reset_index()
+            if not df_saidas_cat.empty:
+                st.bar_chart(df_saidas_cat.set_index('categoria'))
+            else:
+                st.info("Nenhuma saída registrada no período.")
+
+        st.divider()
+        st.subheader("📋 Tabela do Período Selecionado")
+        
+        df_export = df_filtrado_periodo[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
+        
+        st.dataframe(
+            df_export,
+            column_config={
+                "data": "Data Vencimento",
+                "descricao": "Descrição",
+                "categoria": "Categoria",
+                "tipo": "Tipo",
+                "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+                "status": "Status"
+            },
+            hide_index=True
+        )
+
+        # Botão de Download do Relatório
+        csv_data = df_export.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar Relatório em CSV (Excel)",
+            data=csv_data,
+            file_name=f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.csv",
+            mime="text/csv"
+        )
+        
+    else:
+        st.info("Nenhum dado disponível para gerar relatórios.")
