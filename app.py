@@ -126,7 +126,6 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
     
     fill = False
     
-    # Processamento estritamente isolado
     registos = df_periodo.to_dict('records')
     for row in registos:
         try:
@@ -155,6 +154,13 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
 init_db()
 
 st.title("💰 Controle Financeiro Integrado")
+
+# Mapeamento auxiliar de meses
+meses_pt = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
+    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
+    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
+}
 
 # --- RESUMO PAINEL DE MÉTRICAS ---
 df_todos = carregar_dados()
@@ -276,7 +282,7 @@ with aba2:
             st.rerun()
 
 # -------------------------------------------------------------
-# ABA 3: EXTRATO E BAIXAS
+# ABA 3: EXTRATO E BAIXAS (COM FILTRO DE MÊS E ANO)
 # -------------------------------------------------------------
 with aba3:
     st.header("📋 Gerenciamento de Contas e Baixa de Pagamentos")
@@ -284,54 +290,99 @@ with aba3:
     df_exibicao = carregar_dados()
     
     if not df_exibicao.empty:
-        st.subheader("⚡ Dar Baixa ou Alterar Status")
-        col_a1, col_a2, col_a3 = st.columns([4, 2, 2])
+        df_exibicao['datetime'] = pd.to_datetime(df_exibicao['data'])
+        df_exibicao['Ano'] = df_exibicao['datetime'].dt.year
+        df_exibicao['Mês_Num'] = df_exibicao['datetime'].dt.month
+        df_exibicao['Mês_Nome'] = df_exibicao['Mês_Num'].map(meses_pt)
+
+        st.subheader("🔍 Filtros de Busca")
         
-        opcoes_todas = {
-            f"ID {row['id']} | {row['data']} | {row['descricao']} - R$ {row['valor']:.2f} [{row['status']}]": row['id']
-            for _, row in df_exibicao.iterrows()
-        }
+        # Filtros principais em 4 colunas
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         
-        with col_a1:
-            item_selecionado = st.selectbox(
-                "Selecione o lançamento:",
-                options=list(opcoes_todas.keys())
-            )
-            id_target = opcoes_todas[item_selecionado]
-            
-        with col_a2:
-            st.write(" ")
-            st.write(" ")
-            if st.button("✅ Marcar como PAGO"):
-                atualizar_status(id_target, "Pago")
-                st.success("Status alterado para PAGO!")
-                st.rerun()
-
-        with col_a3:
-            st.write(" ")
-            st.write(" ")
-            if st.button("🗑️ Excluir Lançamento"):
-                excluir_registro(id_target)
-                st.warning("Lançamento excluído com sucesso!")
-                st.rerun()
-
-        st.divider()
-        st.subheader("📊 Extrato de Contas")
-
-        col_f1, col_f2 = st.columns(2)
+        anos_disponiveis = ["Todos"] + sorted(list(df_exibicao['Ano'].unique()), reverse=True)
         with col_f1:
-            filtro_status = st.multiselect("Filtrar por Status", options=list(df_exibicao["status"].unique()), default=list(df_exibicao["status"].unique()))
-        with col_f2:
-            filtro_tipo = st.multiselect("Filtrar por Tipo", options=list(df_exibicao["tipo"].unique()), default=list(df_exibicao["tipo"].unique()))
+            filtro_ano = st.selectbox("Filtrar por Ano:", anos_disponiveis, key="extrato_ano")
             
+        with col_f2:
+            if filtro_ano != "Todos":
+                meses_disp = [meses_pt[m] for m in sorted(df_exibicao[df_exibicao['Ano'] == filtro_ano]['Mês_Num'].unique())]
+                meses_opcoes = ["Todos"] + meses_disp
+            else:
+                meses_opcoes = ["Todos"] + list(meses_pt.values())
+            filtro_mes = st.selectbox("Filtrar por Mês:", meses_opcoes, key="extrato_mes")
+            
+        with col_f3:
+            filtro_status = st.multiselect(
+                "Filtrar por Status", 
+                options=list(df_exibicao["status"].unique()), 
+                default=list(df_exibicao["status"].unique()),
+                key="extrato_status"
+            )
+            
+        with col_f4:
+            filtro_tipo = st.multiselect(
+                "Filtrar por Tipo", 
+                options=list(df_exibicao["tipo"].unique()), 
+                default=list(df_exibicao["tipo"].unique()),
+                key="extrato_tipo"
+            )
+            
+        # Aplicação dos Filtros no DataFrame
         df_filtrado = df_exibicao[
             (df_exibicao["status"].isin(filtro_status)) & 
             (df_exibicao["tipo"].isin(filtro_tipo))
         ]
+        
+        if filtro_ano != "Todos":
+            df_filtrado = df_filtrado[df_filtrado['Ano'] == filtro_ano]
+            
+        if filtro_mes != "Todos":
+            df_filtrado = df_filtrado[df_filtrado['Mês_Nome'] == filtro_mes]
 
-        with st.container(height=350):
+        st.divider()
+
+        st.subheader("⚡ Dar Baixa ou Alterar Status")
+        
+        if not df_filtrado.empty:
+            col_a1, col_a2, col_a3 = st.columns([4, 2, 2])
+            
+            opcoes_filtradas = {
+                f"ID {row['id']} | {row['data']} | {row['descricao']} - R$ {row['valor']:.2f} [{row['status']}]": row['id']
+                for _, row in df_filtrado.iterrows()
+            }
+            
+            with col_a1:
+                item_selecionado = st.selectbox(
+                    "Selecione o lançamento (baseado nos filtros atuais):",
+                    options=list(opcoes_filtradas.keys())
+                )
+                id_target = opcoes_filtradas[item_selecionado]
+                
+            with col_a2:
+                st.write(" ")
+                st.write(" ")
+                if st.button("✅ Marcar como PAGO"):
+                    atualizar_status(id_target, "Pago")
+                    st.success("Status alterado para PAGO!")
+                    st.rerun()
+
+            with col_a3:
+                st.write(" ")
+                st.write(" ")
+                if st.button("🗑️ Excluir Lançamento"):
+                    excluir_registro(id_target)
+                    st.warning("Lançamento excluído com sucesso!")
+                    st.rerun()
+        else:
+            st.info("Nenhum lançamento encontrado para os filtros selecionados.")
+
+        st.divider()
+        st.subheader("📊 Extrato de Contas")
+
+        with st.container(height=380):
             st.dataframe(
-                df_filtrado,
+                df_filtrado[['id', 'data', 'descricao', 'categoria', 'tipo', 'valor', 'status']],
                 column_config={
                     "id": "ID",
                     "data": "Data Vencimento",
@@ -359,12 +410,6 @@ with aba4:
         df_relatorio['datetime'] = pd.to_datetime(df_relatorio['data'])
         df_relatorio['Ano'] = df_relatorio['datetime'].dt.year
         df_relatorio['Mês_Num'] = df_relatorio['datetime'].dt.month
-        
-        meses_pt = {
-            1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-            5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-            9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
-        }
         df_relatorio['Mês_Nome'] = df_relatorio['Mês_Num'].map(meses_pt)
         
         # Filtros
@@ -372,15 +417,15 @@ with aba4:
         
         anos_disponiveis = sorted(df_relatorio['Ano'].unique(), reverse=True)
         with col_r1:
-            ano_sel = st.selectbox("Selecione o Ano:", anos_disponiveis)
+            ano_sel = st.selectbox("Selecione o Ano:", anos_disponiveis, key="rel_ano")
             
         with col_r2:
-            opcao_periodo = st.radio("Visão do Relatório:", ["Mensal", "Ano Todo (Acumulado)"], horizontal=True)
+            opcao_periodo = st.radio("Visão do Relatório:", ["Mensal", "Ano Todo (Acumulado)"], horizontal=True, key="rel_opcao")
             
         with col_r3:
             if opcao_periodo == "Mensal":
                 meses_do_ano = [meses_pt[m] for m in sorted(df_relatorio[df_relatorio['Ano'] == ano_sel]['Mês_Num'].unique())]
-                mes_sel_nome = st.selectbox("Selecione o Mês:", meses_do_ano)
+                mes_sel_nome = st.selectbox("Selecione o Mês:", meses_do_ano, key="rel_mes")
             else:
                 mes_sel_nome = "Todos"
 
@@ -448,7 +493,6 @@ with aba4:
         titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
 
         if st.button("⚙️ Gerar Relatório PDF"):
-            # Armazena apenas o buffer retornado
             pdf_data = gerar_pdf_isolado(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m)
             st.session_state['pdf_pronto'] = pdf_data
             st.session_state['pdf_nome'] = f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.pdf"
