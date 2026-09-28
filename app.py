@@ -66,16 +66,16 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 25, 'F')
         self.set_font('Helvetica', 'B', 16)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
+        _ = self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
         self.set_font('Helvetica', 'I', 10)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
+        _ = self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
         self.ln(10)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y às %H:%M")} | Página {self.page_no()}/{{nb}}', align='C')
+        _ = self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y às %H:%M")} | Página {self.page_no()}/{{nb}}', align='C')
 
 def construir_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, aberto):
     pdf = RelatorioPDF(titulo_periodo)
@@ -85,7 +85,7 @@ def construir_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo,
     # Quadro Resumo
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
+    _ = pdf.cell(0, 8, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
     
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(0, 0, 0)
@@ -96,17 +96,17 @@ def construir_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo,
     
     y_start = pdf.get_y() + 4
     pdf.set_y(y_start)
-    pdf.cell(47.5, 6, f'Entradas: R$ {total_ent:,.2f}', align='C')
-    pdf.cell(47.5, 6, f'Saídas: R$ {total_sai:,.2f}', align='C')
-    pdf.cell(47.5, 6, f'Saldo Líquido: R$ {saldo:,.2f}', align='C')
-    pdf.cell(47.5, 6, f'Em Aberto: R$ {aberto:,.2f}', align='C')
+    _ = pdf.cell(47.5, 6, f'Entradas: R$ {total_ent:,.2f}', align='C')
+    _ = pdf.cell(47.5, 6, f'Saídas: R$ {total_sai:,.2f}', align='C')
+    _ = pdf.cell(47.5, 6, f'Saldo Líquido: R$ {saldo:,.2f}', align='C')
+    _ = pdf.cell(47.5, 6, f'Em Aberto: R$ {aberto:,.2f}', align='C')
     
     pdf.set_y(y_start + 20)
 
     # Tabela
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
+    _ = pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(2)
 
     pdf.set_font('Helvetica', 'B', 9)
@@ -118,7 +118,7 @@ def construir_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo,
     
     for idx, col in enumerate(colunas):
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
-        pdf.cell(larguras[idx], 8, col, fill=True, border=1, align=align)
+        _ = pdf.cell(larguras[idx], 8, col, fill=True, border=1, align=align)
     pdf.ln()
 
     pdf.set_font('Helvetica', '', 8)
@@ -135,12 +135,12 @@ def construir_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo,
         
         pdf.set_fill_color(245, 247, 250) if fill else pdf.set_fill_color(255, 255, 255)
         
-        pdf.cell(larguras[0], 7, data_str, border=1, align='C', fill=fill)
-        pdf.cell(larguras[1], 7, str(row['descricao'])[:35], border=1, align='L', fill=fill)
-        pdf.cell(larguras[2], 7, str(row['categoria'])[:20], border=1, align='L', fill=fill)
-        pdf.cell(larguras[3], 7, str(row['tipo']), border=1, align='C', fill=fill)
-        pdf.cell(larguras[4], 7, valor_str, border=1, align='R', fill=fill)
-        pdf.cell(larguras[5], 7, str(row['status']), border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[0], 7, data_str, border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[1], 7, str(row['descricao'])[:35], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[2], 7, str(row['categoria'])[:20], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[3], 7, str(row['tipo']), border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[4], 7, valor_str, border=1, align='R', fill=fill)
+        _ = pdf.cell(larguras[5], 7, str(row['status']), border=1, align='C', fill=fill)
         pdf.ln()
         fill = not fill
 
@@ -438,12 +438,13 @@ with aba4:
                 hide_index=True
             )
 
-        # Download do PDF
+        # Download do PDF sem vazamento de retorno no Streamlit
         titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
-        
+        bytes_pdf = construir_pdf_bytes(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m)
+
         st.download_button(
             label="📄 Baixar Relatório Profissional em PDF",
-            data=construir_pdf_bytes(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m),
+            data=bytes_pdf,
             file_name=f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.pdf",
             mime="application/pdf"
         )
