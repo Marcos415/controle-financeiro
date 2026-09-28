@@ -3,6 +3,8 @@ import pandas as pd
 import sqlite3
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from fpdf import FPDF
+import io
 
 # Configuração da página
 st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="💰")
@@ -54,6 +56,99 @@ def excluir_registro(id_registro):
     c.execute("DELETE FROM lancamentos WHERE id = ?", (id_registro,))
     conn.commit()
     conn.close()
+
+# --- CLASSE PARA GERAÇÃO DO PDF PROFISSIONAL ---
+class RelatorioPDF(FPDF):
+    def __init__(self, titulo_periodo):
+        super().__init__(orientation='P', unit='mm', format='A4')
+        self.titulo_periodo = titulo_periodo
+
+    def header(self):
+        # Cabeçalho Principal
+        self.set_fill_color(31, 78, 121) # Azul escuro profissional
+        self.rect(0, 0, 210, 25, 'F')
+        self.set_font('Helvetica', 'B', 16)
+        self.set_text_color(255, 255, 255)
+        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', new_x="LMARGIN", new_y="NEXT")
+        self.set_font('Helvetica', 'I', 10)
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x="LMARGIN", new_y="NEXT")
+        self.ln(10)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Helvetica', 'I', 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y às %H:%M")} | Página {self.page_no()}/{{nb}}', align='C')
+
+def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo, aberto):
+    pdf = RelatorioPDF(titulo_periodo)
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    
+    # --- QUADRO RESUMO DE MÉTRICAS ---
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_text_color(31, 78, 121)
+    pdf.cell(0, 8, 'RESUMO DO PERÍODO', new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.set_font('Helvetica', '', 10)
+    pdf.set_text_color(0, 0, 0)
+    
+    # Caixa Resumo
+    pdf.set_fill_color(240, 243, 246)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.rect(10, pdf.get_y(), 190, 20, 'FD')
+    
+    y_start = pdf.get_y() + 4
+    pdf.set_y(y_start)
+    pdf.cell(47.5, 6, f'Entradas: R$ {total_ent:,.2f}', align='C')
+    pdf.cell(47.5, 6, f'Saídas: R$ {total_sai:,.2f}', align='C')
+    pdf.cell(47.5, 6, f'Saldo Líquido: R$ {saldo:,.2f}', align='C')
+    pdf.cell(47.5, 6, f'Em Aberto: R$ {aberto:,.2f}', align='C')
+    
+    pdf.set_y(y_start + 20)
+
+    # --- TABELA DE LANÇAMENTOS ---
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_text_color(31, 78, 121)
+    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    # Cabeçalho da Tabela
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_fill_color(31, 78, 121)
+    pdf.set_text_color(255, 255, 255)
+    
+    larguras = [25, 65, 35, 20, 25, 20] # Total 190mm
+    colunas = ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Status']
+    
+    for idx, col in enumerate(colunas):
+        align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
+        pdf.cell(larguras[idx], 8, col, fill=True, border=1, align=align)
+    pdf.ln()
+
+    # Linhas da Tabela
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_text_color(0, 0, 0)
+    
+    fill = False
+    for _, row in df_periodo.iterrows():
+        # Trata formatação da data para DD/MM/AAAA
+        data_str = datetime.strptime(row['data'], '%Y-%m-%d').strftime('%d/%m/%Y') if row['data'] else ''
+        valor_str = f"R$ {row['valor']:,.2f}"
+        
+        pdf.set_fill_color(245, 247, 250) if fill else pdf.set_fill_color(255, 255, 255)
+        
+        pdf.cell(larguras[0], 7, data_str, border=1, align='C', fill=fill)
+        pdf.cell(larguras[1], 7, str(row['descricao'])[:35], border=1, align='L', fill=fill)
+        pdf.cell(larguras[2], 7, str(row['categoria'])[:20], border=1, align='L', fill=fill)
+        pdf.cell(larguras[3], 7, str(row['tipo']), border=1, align='C', fill=fill)
+        pdf.cell(larguras[4], 7, valor_str, border=1, align='R', fill=fill)
+        pdf.cell(larguras[5], 7, str(row['status']), border=1, align='C', fill=fill)
+        pdf.ln()
+        fill = not fill
+
+    # Retorna o PDF como bytes para download no Streamlit
+    return bytes(pdf.output())
 
 # Inicializa o banco de dados
 init_db()
@@ -251,7 +346,7 @@ with aba3:
         st.info("Nenhum lançamento registrado até o momento.")
 
 # -------------------------------------------------------------
-# ABA 4: RELATÓRIOS MENSAIS E ANUAIS
+# ABA 4: RELATÓRIOS MENSAIS E ANUAIS (COM EXPORTAÇÃO PDF)
 # -------------------------------------------------------------
 with aba4:
     st.header("📅 Relatórios e Movimentação por Mês/Ano")
@@ -259,7 +354,6 @@ with aba4:
     df_relatorio = carregar_dados()
     
     if not df_relatorio.empty:
-        # Prepara colunas de data
         df_relatorio['datetime'] = pd.to_datetime(df_relatorio['data'])
         df_relatorio['Ano'] = df_relatorio['datetime'].dt.year
         df_relatorio['Mês_Num'] = df_relatorio['datetime'].dt.month
@@ -271,7 +365,7 @@ with aba4:
         }
         df_relatorio['Mês_Nome'] = df_relatorio['Mês_Num'].map(meses_pt)
         
-        # Filtros no topo da aba
+        # Filtros
         col_r1, col_r2, col_r3 = st.columns(3)
         
         anos_disponiveis = sorted(df_relatorio['Ano'].unique(), reverse=True)
@@ -288,14 +382,14 @@ with aba4:
             else:
                 mes_sel_nome = "Todos"
 
-        # Filtragem do DataFrame conforme seleção
+        # Filtragem dos Dados
         df_filtrado_periodo = df_relatorio[df_relatorio['Ano'] == ano_sel]
         if opcao_periodo == "Mensal" and mes_sel_nome != "Todos":
             df_filtrado_periodo = df_filtrado_periodo[df_filtrado_periodo['Mês_Nome'] == mes_sel_nome]
 
         st.divider()
 
-        # Métricas do Período Selecionado
+        # Métricas do Período
         ent_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Entrada']['valor'].sum()
         sai_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Saída']['valor'].sum()
         saldo_m = ent_m - sai_m
@@ -308,7 +402,7 @@ with aba4:
         c3.metric("Saldo do Período", f"R$ {saldo_m:,.2f}")
         c4.metric("A Vencer / Em Aberto", f"R$ {aberto_m:,.2f}")
 
-        # Gráficos
+        # Gráficos na tela
         st.divider()
         col_g1, col_g2 = st.columns(2)
         
@@ -346,13 +440,15 @@ with aba4:
             hide_index=True
         )
 
-        # Botão de Download do Relatório
-        csv_data = df_export.to_csv(index=False).encode('utf-8')
+        # Botão de Gerar/Baixar Relatório PDF
+        titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
+        pdf_bytes = gerar_pdf_financeiro(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m)
+        
         st.download_button(
-            label="📥 Baixar Relatório em CSV (Excel)",
-            data=csv_data,
-            file_name=f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.csv",
-            mime="text/csv"
+            label="📄 Baixar Relatório Profissional em PDF",
+            data=pdf_bytes,
+            file_name=f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.pdf",
+            mime="application/pdf"
         )
         
     else:
