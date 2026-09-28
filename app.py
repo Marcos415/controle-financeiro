@@ -10,8 +10,7 @@ st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="�
 
 # --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
 def get_connection():
-    conn = sqlite3.connect("financeiro.db")
-    return conn
+    return sqlite3.connect("financeiro.db")
 
 def init_db():
     conn = get_connection()
@@ -67,9 +66,9 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 25, 'F')
         self.set_font('Helvetica', 'B', 16)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', ln=1)
+        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
         self.set_font('Helvetica', 'I', 10)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', ln=1)
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
         self.ln(10)
 
     def footer(self):
@@ -78,7 +77,7 @@ class RelatorioPDF(FPDF):
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y às %H:%M")} | Página {self.page_no()}/{{nb}}', align='C')
 
-def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo, aberto):
+def construir_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, aberto):
     pdf = RelatorioPDF(titulo_periodo)
     pdf.alias_nb_pages()
     pdf.add_page()
@@ -86,7 +85,7 @@ def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo
     # Quadro Resumo
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'RESUMO DO PERÍODO', ln=1)
+    pdf.cell(0, 8, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
     
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(0, 0, 0)
@@ -107,7 +106,7 @@ def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo
     # Tabela
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
+    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(2)
 
     pdf.set_font('Helvetica', 'B', 9)
@@ -325,7 +324,7 @@ with aba3:
             (df_exibicao["tipo"].isin(filtro_tipo))
         ]
 
-        with st.container(height=400):
+        with st.container(height=350):
             st.dataframe(
                 df_filtrado,
                 column_config={
@@ -425,7 +424,6 @@ with aba4:
         
         df_export = df_filtrado_periodo[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
         
-        # Container com rolar de tamanho fixo para não esticar a tela
         with st.container(height=350):
             st.dataframe(
                 df_export,
@@ -440,13 +438,12 @@ with aba4:
                 hide_index=True
             )
 
-        # Botão de Gerar/Baixar Relatório PDF
+        # Download do PDF
         titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
-        pdf_bytes = gerar_pdf_financeiro(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m)
         
         st.download_button(
             label="📄 Baixar Relatório Profissional em PDF",
-            data=pdf_bytes,
+            data=construir_pdf_bytes(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m),
             file_name=f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.pdf",
             mime="application/pdf"
         )
