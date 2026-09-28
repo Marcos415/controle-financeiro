@@ -5,3 +5,5 @@ google-auth
 plotly
 openpyxl
 weasyprint
+python-dateutil
+fpdf2
