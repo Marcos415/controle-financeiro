@@ -55,24 +55,12 @@ def excluir_registro(id_registro):
     conn.commit()
     conn.close()
 
-def atualizar_tabela_completa(df_editado):
-    conn = get_connection()
-    c = conn.cursor()
-    for _, row in df_editado.iterrows():
-        c.execute('''
-            UPDATE lancamentos 
-            SET data = ?, descricao = ?, categoria = ?, tipo = ?, valor = ?, status = ?
-            WHERE id = ?
-        ''', (row['data'], row['descricao'], row['categoria'], row['tipo'], float(row['valor']), row['status'], int(row['id'])))
-    conn.commit()
-    conn.close()
-
 # Inicializa o banco de dados
 init_db()
 
 st.title("💰 Controle Financeiro Integrado")
 
-# --- RESUMO PAINEL DE MÉTRICAS (METRICS) ---
+# --- RESUMO PAINEL DE MÉTRICAS ---
 df_todos = carregar_dados()
 
 st.markdown("### 📊 Visão Geral do Caixa")
@@ -91,7 +79,7 @@ if not df_todos.empty:
     col_m4.metric("Contas em Aberto ⚠️", f"R$ {em_aberto:,.2f}")
     col_m5.metric("Contas Pagas/Fechadas ✅", f"R$ {pago_fechado:,.2f}")
 else:
-    st.info("Nenhum lançamento registado até ao momento.")
+    st.info("Nenhum lançamento registrado até o momento.")
 
 st.divider()
 
@@ -191,7 +179,7 @@ with aba2:
             st.rerun()
 
 # -------------------------------------------------------------
-# ABA 3: EXTRATO, BAIXAS E EDITIONS
+# ABA 3: EXTRATO E BAIXAS
 # -------------------------------------------------------------
 with aba3:
     st.header("📋 Gerenciamento de Contas e Baixa de Pagamentos")
@@ -199,80 +187,69 @@ with aba3:
     df_exibicao = carregar_dados()
     
     if not df_exibicao.empty:
-        # Seção de Ações Rápidas (Dar Baixa / Excluir)
-        st.subheader("⚡ Ações Rápidas")
-        col_a1, col_a2, col_a3 = st.columns([3, 2, 2])
+        # Seção de Ações Rápidas (Dar Baixa / Excluir / Mudar Status)
+        st.subheader("⚡ Dar Baixa ou Alterar Status")
         
-        # Filtra opções em aberto para facilitar a seleção
-        df_abertas = df_exibicao[df_exibicao['status'] == 'Aberto']
+        col_a1, col_a2, col_a3 = st.columns([4, 2, 2])
         
-        opcoes_baixa = {
-            f"ID {row['id']} | {row['data']} | {row['descricao']} - R$ {row['valor']:.2f}": row['id']
-            for _, row in df_abertas.iterrows()
+        # Mapeia id e informações do lançamento para seleção
+        opcoes_todas = {
+            f"ID {row['id']} | {row['data']} | {row['descricao']} - R$ {row['valor']:.2f} [{row['status']}]": row['id']
+            for _, row in df_exibicao.iterrows()
         }
         
         with col_a1:
             item_selecionado = st.selectbox(
-                "Selecione uma conta em aberto para alterar o status:",
-                options=list(opcoes_baixa.keys()) if opcoes_baixa else ["Nenhuma conta pendente em aberto"]
+                "Selecione o lançamento:",
+                options=list(opcoes_todas.keys())
             )
+            id_target = opcoes_todas[item_selecionado]
             
         with col_a2:
             st.write(" ")
             st.write(" ")
-            if st.button("✅ Marcar como PAGO", use_container_width=True) and opcoes_baixa:
-                id_target = opcoes_baixa[item_selecionado]
+            if st.button("✅ Marcar como PAGO"):
                 atualizar_status(id_target, "Pago")
-                st.success("Baixa dada com sucesso!")
+                st.success("Status alterado para PAGO!")
                 st.rerun()
 
         with col_a3:
             st.write(" ")
             st.write(" ")
-            opcoes_todas = {
-                f"ID {row['id']} | {row['data']} | {row['descricao']}": row['id']
-                for _, row in df_exibicao.iterrows()
-            }
-            if st.button("🗑️ Excluir Lançamento Selecionado", use_container_width=True) and opcoes_baixa:
-                id_target = opcoes_baixa[item_selecionado]
+            if st.button("🗑️ Excluir Lançamento"):
                 excluir_registro(id_target)
                 st.warning("Lançamento excluído com sucesso!")
                 st.rerun()
 
         st.divider()
-        st.subheader("📝 Tabela Interativa de Edição Geral")
-        st.caption("Pode alterar os campos (como status, data, valor ou descrição) diretamente na tabela e clicar no botão abaixo para salvar.")
+        st.subheader("📊 Extrato de Contas")
 
         # Filtros para a tabela
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            filtro_status = st.multiselect("Filtrar por Status", options=df_exibicao["status"].unique(), default=df_exibicao["status"].unique())
+            filtro_status = st.multiselect("Filtrar por Status", options=list(df_exibicao["status"].unique()), default=list(df_exibicao["status"].unique()))
         with col_f2:
-            filtro_tipo = st.multiselect("Filtrar por Tipo", options=df_exibicao["tipo"].unique(), default=df_exibicao["tipo"].unique())
+            filtro_tipo = st.multiselect("Filtrar por Tipo", options=list(df_exibicao["tipo"].unique()), default=list(df_exibicao["tipo"].unique()))
             
         df_filtrado = df_exibicao[
             (df_exibicao["status"].isin(filtro_status)) & 
             (df_exibicao["tipo"].isin(filtro_tipo))
         ]
 
-        # Tabela editável
-        df_editado = st.data_editor(
+        # Tabela formatada e limpa
+        st.dataframe(
             df_filtrado,
             column_config={
-                "id": st.column_config.NumberColumn("ID", disabled=True),
-                "status": st.column_config.SelectboxColumn("Status", options=["Aberto", "Pago"], required=True),
-                "tipo": st.column_config.SelectboxColumn("Tipo", options=["Saída", "Entrada"], required=True),
+                "id": "ID",
+                "data": "Data Vencimento",
+                "descricao": "Descrição",
+                "categoria": "Categoria",
+                "tipo": "Tipo",
                 "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-                "data": st.column_config.DateColumn("Data Vencimento", format="YYYY-MM-DD")
+                "status": "Status"
             },
-            hide_index=True,
-            use_container_width=True
+            hide_index=True
         )
-
-        if st.button("💾 Guardar Alterações da Tabela"):
-            atualizar_tabela_completa(df_editado)
-            st.success("Tabela atualizada com sucesso!")
-            st.rerun()
 
     else:
         st.info("Nenhum lançamento registrado até o momento.")
