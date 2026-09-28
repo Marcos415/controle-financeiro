@@ -55,7 +55,7 @@ def excluir_registro(id_registro):
     conn.commit()
     conn.close()
 
-# --- CLASSE PARA GERAÇÃO DO PDF PROFISSIONAL ---
+# --- CLASSE PARA GERAÇÃO DO PDF ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -125,7 +125,8 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
     pdf.set_text_color(0, 0, 0)
     
     fill = False
-    # Converte o dataframe para lista de dicionários para não usar iterrows() no FPDF
+    
+    # Processamento estritamente isolado
     registos = df_periodo.to_dict('records')
     for row in registos:
         try:
@@ -137,16 +138,18 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
         
         pdf.set_fill_color(245, 247, 250) if fill else pdf.set_fill_color(255, 255, 255)
         
-        pdf.cell(larguras[0], 7, data_str, border=1, align='C', fill=fill)
-        pdf.cell(larguras[1], 7, str(row['descricao'])[:35], border=1, align='L', fill=fill)
-        pdf.cell(larguras[2], 7, str(row['categoria'])[:20], border=1, align='L', fill=fill)
-        pdf.cell(larguras[3], 7, str(row['tipo']), border=1, align='C', fill=fill)
-        pdf.cell(larguras[4], 7, valor_str, border=1, align='R', fill=fill)
-        pdf.cell(larguras[5], 7, str(row['status']), border=1, align='C', fill=fill)
-        pdf.ln()
+        _ = pdf.cell(larguras[0], 7, data_str, border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[1], 7, str(row['descricao'])[:35], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[2], 7, str(row['categoria'])[:20], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[3], 7, str(row['tipo']), border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[4], 7, valor_str, border=1, align='R', fill=fill)
+        _ = pdf.cell(larguras[5], 7, str(row['status']), border=1, align='C', fill=fill)
+        _ = pdf.ln()
+        
         fill = not fill
 
-    return bytes(pdf.output())
+    pdf_bytes = bytes(pdf.output())
+    return pdf_bytes
 
 # Inicializa o banco de dados
 init_db()
@@ -440,13 +443,16 @@ with aba4:
                 hide_index=True
             )
 
-        # GERAÇÃO DO PDF APENAS MEDIANTE AÇÃO DO UTILIZADOR (ELIMINA OS 'NONE')
+        # GERAÇÃO DO PDF ISOLADA
         st.divider()
         titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
 
         if st.button("⚙️ Gerar Relatório PDF"):
-            st.session_state['pdf_pronto'] = gerar_pdf_isolado(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m)
+            # Armazena apenas o buffer retornado
+            pdf_data = gerar_pdf_isolado(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m)
+            st.session_state['pdf_pronto'] = pdf_data
             st.session_state['pdf_nome'] = f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.pdf"
+            st.rerun()
 
         if 'pdf_pronto' in st.session_state:
             st.download_button(
