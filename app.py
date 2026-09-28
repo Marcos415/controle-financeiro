@@ -4,7 +4,6 @@ import sqlite3
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
-import io
 
 # Configuração da página
 st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="💰")
@@ -64,14 +63,13 @@ class RelatorioPDF(FPDF):
         self.titulo_periodo = titulo_periodo
 
     def header(self):
-        # Cabeçalho Principal
-        self.set_fill_color(31, 78, 121) # Azul escuro profissional
+        self.set_fill_color(31, 78, 121)
         self.rect(0, 0, 210, 25, 'F')
         self.set_font('Helvetica', 'B', 16)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', ln=1)
         self.set_font('Helvetica', 'I', 10)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', ln=1)
         self.ln(10)
 
     def footer(self):
@@ -85,15 +83,14 @@ def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo
     pdf.alias_nb_pages()
     pdf.add_page()
     
-    # --- QUADRO RESUMO DE MÉTRICAS ---
+    # Quadro Resumo
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'RESUMO DO PERÍODO', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, 'RESUMO DO PERÍODO', ln=1)
     
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(0, 0, 0)
     
-    # Caixa Resumo
     pdf.set_fill_color(240, 243, 246)
     pdf.set_draw_color(200, 200, 200)
     pdf.rect(10, pdf.get_y(), 190, 20, 'FD')
@@ -107,18 +104,17 @@ def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo
     
     pdf.set_y(y_start + 20)
 
-    # --- TABELA DE LANÇAMENTOS ---
+    # Tabela
     pdf.set_font('Helvetica', 'B', 11)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
     pdf.ln(2)
 
-    # Cabeçalho da Tabela
     pdf.set_font('Helvetica', 'B', 9)
     pdf.set_fill_color(31, 78, 121)
     pdf.set_text_color(255, 255, 255)
     
-    larguras = [25, 65, 35, 20, 25, 20] # Total 190mm
+    larguras = [25, 65, 35, 20, 25, 20]
     colunas = ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Status']
     
     for idx, col in enumerate(colunas):
@@ -126,14 +122,16 @@ def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo
         pdf.cell(larguras[idx], 8, col, fill=True, border=1, align=align)
     pdf.ln()
 
-    # Linhas da Tabela
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(0, 0, 0)
     
     fill = False
     for _, row in df_periodo.iterrows():
-        # Trata formatação da data para DD/MM/AAAA
-        data_str = datetime.strptime(row['data'], '%Y-%m-%d').strftime('%d/%m/%Y') if row['data'] else ''
+        try:
+            data_str = datetime.strptime(str(row['data']), '%Y-%m-%d').strftime('%d/%m/%Y')
+        except Exception:
+            data_str = str(row['data'])
+            
         valor_str = f"R$ {row['valor']:,.2f}"
         
         pdf.set_fill_color(245, 247, 250) if fill else pdf.set_fill_color(255, 255, 255)
@@ -147,7 +145,6 @@ def gerar_pdf_financeiro(df_periodo, titulo_periodo, total_ent, total_sai, saldo
         pdf.ln()
         fill = not fill
 
-    # Retorna o PDF como bytes para download no Streamlit
     return bytes(pdf.output())
 
 # Inicializa o banco de dados
@@ -328,25 +325,26 @@ with aba3:
             (df_exibicao["tipo"].isin(filtro_tipo))
         ]
 
-        st.dataframe(
-            df_filtrado,
-            column_config={
-                "id": "ID",
-                "data": "Data Vencimento",
-                "descricao": "Descrição",
-                "categoria": "Categoria",
-                "tipo": "Tipo",
-                "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-                "status": "Status"
-            },
-            hide_index=True
-        )
+        with st.container(height=400):
+            st.dataframe(
+                df_filtrado,
+                column_config={
+                    "id": "ID",
+                    "data": "Data Vencimento",
+                    "descricao": "Descrição",
+                    "categoria": "Categoria",
+                    "tipo": "Tipo",
+                    "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+                    "status": "Status"
+                },
+                hide_index=True
+            )
 
     else:
         st.info("Nenhum lançamento registrado até o momento.")
 
 # -------------------------------------------------------------
-# ABA 4: RELATÓRIOS MENSAIS E ANUAIS (COM EXPORTAÇÃO PDF)
+# ABA 4: RELATÓRIOS MENSAIS E ANUAIS
 # -------------------------------------------------------------
 with aba4:
     st.header("📅 Relatórios e Movimentação por Mês/Ano")
@@ -427,18 +425,20 @@ with aba4:
         
         df_export = df_filtrado_periodo[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
         
-        st.dataframe(
-            df_export,
-            column_config={
-                "data": "Data Vencimento",
-                "descricao": "Descrição",
-                "categoria": "Categoria",
-                "tipo": "Tipo",
-                "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-                "status": "Status"
-            },
-            hide_index=True
-        )
+        # Container com rolar de tamanho fixo para não esticar a tela
+        with st.container(height=350):
+            st.dataframe(
+                df_export,
+                column_config={
+                    "data": "Data Vencimento",
+                    "descricao": "Descrição",
+                    "categoria": "Categoria",
+                    "tipo": "Tipo",
+                    "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
+                    "status": "Status"
+                },
+                hide_index=True
+            )
 
         # Botão de Gerar/Baixar Relatório PDF
         titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
