@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime
+from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
 import plotly.express as px
 from weasyprint import HTML
 import json
@@ -34,16 +35,14 @@ except Exception as e:
     st.stop()
 
 # ==========================================================
-# FUNÇÕES DE MANIPULAÇÃO DE DADOS DINÂMICAS
+# FUNÇÕES DE MANIPULAÇÃO DE DADOS
 # ==========================================================
 def obter_posicao_coluna_status():
-    """Identifica dinamicamente em qual coluna da planilha o 'Status' está localizado"""
     try:
         cabecalho = aba.row_values(1)
         if "Status" in cabecalho:
             return cabecalho.index("Status") + 1
         else:
-            # Se não existir a coluna Status no cabeçalho, adiciona na última posição
             pos = len(cabecalho) + 1
             aba.update_cell(1, pos, "Status")
             return pos
@@ -59,7 +58,6 @@ def carregar_dados():
 
     df = pd.DataFrame(dados)
     
-    # Tratamento rígido do campo Status
     if "Status" not in df.columns:
         df["Status"] = "Fechado"
     else:
@@ -76,26 +74,42 @@ def carregar_dados():
     df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
     df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0)
     df = df.dropna(subset=["Data"])
-    
-    # Armazena o número da linha física no Google Sheets
     df["_linha_sheet"] = df.index + 2
     return df
 
-def salvar_transacao(data, descricao, categoria, tipo, valor, status_conta):
+def salvar_transacao_unica(data_trans, descricao, categoria, tipo, valor, status_conta):
     col_status_idx = obter_posicao_coluna_status()
+    nova_linha = [str(data_trans), str(descricao), str(categoria), str(tipo), float(valor)]
     
-    # Garante que o cabeçalho tem todas as colunas alinhadas
-    cabecalho = aba.row_values(1)
-    
-    # Prepara a linha base
-    nova_linha = [str(data), str(descricao), str(categoria), str(tipo), float(valor)]
-    
-    # Ajusta o posicionamento do status conforme a coluna detectada
     while len(nova_linha) < col_status_idx - 1:
         nova_linha.append("")
     nova_linha.insert(col_status_idx - 1, str(status_conta))
     
     aba.append_row(nova_linha)
+
+def salvar_transacao_parcelada(data_inicial, descricao, categoria, tipo, valor_base, qtd_parcelas, tipo_calculo, status_inicial):
+    col_status_idx = obter_posicao_coluna_status()
+    
+    if tipo_calculo == "Valor Total (Dividir pelas parcelas)":
+        valor_parcela = round(valor_base / qtd_parcelas, 2)
+    else:
+        valor_parcela = round(valor_base, 2)
+
+    novas_linhas = []
+    for i in range(qtd_parcelas):
+        data_vencimento = data_inicial + relativedelta(months=i)
+        desc_parcela = f"{descricao} ({i+1}/{qtd_parcelas})"
+        
+        # Apenas a primeira parcela pode herdar o status selecionado se for o caso; as demais nascem em 'Aberto'
+        st_parcela = status_inicial if i == 0 else "Aberto"
+        
+        linha = [str(data_vencimento), str(desc_parcela), str(categoria), str(tipo), float(valor_parcela)]
+        while len(linha) < col_status_idx - 1:
+            linha.append("")
+        linha.insert(col_status_idx - 1, str(st_parcela))
+        novas_linhas.append(linha)
+    
+    aba.append_rows(novas_linhas)
 
 def alternar_status_transacao(linha_sheet, status_atual):
     col_status_idx = obter_posicao_coluna_status()
@@ -199,44 +213,94 @@ def gerar_pdf_relatorio(df_relatorio, titulo_periodo, entradas_tot, saidas_tot, 
 # INTERFACE STREAMLIT
 # ==========================================================
 st.set_page_config(page_title="Controle Financeiro", layout="wide")
-st.title("💰 Controle Financeiro")
+st.title("💰 Controle Financeiro & Contas a Pagar")
 
-# --- FORMULÁRIO DE CADASTRO ---
-with st.expander("➕ Nova Transação", expanded=True):
+# --- ALERTAS DE VENCIMENTO ---
+df_todos = carregar_dados()
+
+if not df_todos.empty:
+    hoje = pd.to_datetime(date.today())
+    df_vencidos = df_todos[(df_todos["Status"] == "Aberto") & (df_todos["Data"] < hoje) & (df_todos["Tipo"] == "Saída")]
+    
+    if not df_vencidos.empty:
+        total_vencido = df_vencidos["Valor"].sum()
+        st.error(f"🚨 **Atenção:** Você possui **{len(df_vencidos)} conta(s) vencida(s)** totalizando **R$ {total_vencido:,.2f}**. Verifique no Contas a Pagar!")
+
+# --- FORMULÁRIO DE CADASTRO (ÚNICO / PARCELADO) ---
+st.subheader("➕ Novo Lançamento")
+tab_unica, tab_parcelada = st.tabs(["Lançamento Único", "Lançamento Parcelado / Recorrente"])
+
+with tab_unica:
     col1, col2 = st.columns(2)
     with col1:
-        data_in = st.date_input("Data")
-        desc_in = st.text_input("Descrição")
-        cat_in = st.text_input("Categoria")
+        data_in = st.date_input("Data do Lançamento", key="u_data")
+        desc_in = st.text_input("Descrição", key="u_desc")
+        cat_in = st.text_input("Categoria", key="u_cat")
     with col2:
-        tipo_in = st.selectbox("Tipo", ["Entrada", "Saída"])
-        valor_in = st.number_input("Valor", min_value=0.0, format="%.2f")
+        tipo_in = st.selectbox("Tipo", ["Saída", "Entrada"], key="u_tipo")
+        valor_in = st.number_input("Valor (R$)", min_value=0.0, format="%.2f", key="u_valor")
         status_in = st.selectbox(
-            "Status da Conta", 
+            "Status Inicial", 
             ["Aberto", "Fechado"], 
-            help="'Aberto' não desconta/soma no saldo até ser Fechado."
+            key="u_status",
+            help="'Aberto' vai para o Contas a Pagar e não desconta do Saldo até ser Fechado."
         )
 
-if st.button("Salvar Transação"):
-    if desc_in and valor_in > 0:
-        salvar_transacao(
-            data=data_in,
-            descricao=desc_in,
-            categoria=cat_in,
-            tipo=tipo_in,
-            valor=valor_in,
-            status_conta=status_in
+    if st.button("Salvar Lançamento Único"):
+        if desc_in and valor_in > 0:
+            salvar_transacao_unica(
+                data_trans=data_in,
+                descricao=desc_in,
+                categoria=cat_in,
+                tipo=tipo_in,
+                valor=valor_in,
+                status_conta=status_in
+            )
+            st.success(f"Transação salva com status '{status_in}' com sucesso!")
+            st.rerun()
+        else:
+            st.warning("Preencha a descrição e um valor maior que zero.")
+
+with tab_parcelada:
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        data_p_in = st.date_input("Data da 1ª Parcela", key="p_data")
+        desc_p_in = st.text_input("Descrição (ex: Compra Notebook)", key="p_desc")
+        cat_p_in = st.text_input("Categoria", key="p_cat")
+        tipo_p_in = st.selectbox("Tipo", ["Saída", "Entrada"], key="p_tipo")
+    with col_p2:
+        tipo_calc = st.radio(
+            "Regra de Valor:", 
+            ["Valor Total (Dividir pelas parcelas)", "Valor Fixado por Parcela"]
         )
-        st.success(f"Transação salva com status '{status_in}' com sucesso!")
-        st.rerun()
-    else:
-        st.warning("Preencha a descrição e um valor maior que zero.")
+        valor_p_in = st.number_input("Valor Digitado (R$)", min_value=0.0, format="%.2f", key="p_valor")
+        qtd_parc = st.number_input("Quantidade de Parcelas", min_value=2, max_value=72, value=12, step=1)
+        status_p_in = st.selectbox("Status da 1ª Parcela", ["Aberto", "Fechado"], key="p_status")
+
+    if st.button("Gerar e Salvar Parcelamento"):
+        if desc_p_in and valor_p_in > 0:
+            salvar_transacao_parcelada(
+                data_inicial=data_p_in,
+                descricao=desc_p_in,
+                categoria=cat_p_in,
+                tipo=tipo_p_in,
+                valor_base=valor_p_in,
+                qtd_parcelas=int(qtd_parc),
+                tipo_calculo=tipo_calc,
+                status_inicial=status_p_in
+            )
+            st.success(f"Geradas {qtd_parcelas} parcelas com sucesso!")
+            st.rerun()
+        else:
+            st.warning("Preencha a descrição e um valor maior que zero.")
+
+st.divider()
 
 # --- CARREGAMENTO E FILTROS ---
 df = carregar_dados()
 
 if not df.empty:
-    st.subheader("Filtros")
+    st.subheader("📊 Visão Geral e Filtros")
     anos_disponiveis = sorted(df["Data"].dt.year.unique(), reverse=True)
     
     col_f1, col_f2 = st.columns(2)
@@ -256,7 +320,7 @@ if not df.empty:
     else:
         titulo_periodo = f"Ano de {ano}"
 
-    # CÁLCULO DE SALDO: Apenas transações 'Fechado' afetam o saldo efetivado
+    # CÁLCULO DE SALDO
     df_fechados = df_filtrado[df_filtrado["Status"] == "Fechado"]
     df_abertos = df_filtrado[df_filtrado["Status"] == "Aberto"]
 
@@ -267,18 +331,16 @@ if not df.empty:
     saidas_pendentes = df_abertos[df_abertos["Tipo"] == "Saída"]["Valor"].sum()
 
     # --- DASHBOARD ---
-    st.subheader("📊 Dashboard do Período")
     c1, c2, c3, c4 = st.columns(4)
-
     c1.metric("Entradas (Realizadas)", f"R$ {entradas_realizadas:,.2f}")
-    c2.metric("Saídas (Fechadas)", f"R$ {saidas_realizadas:,.2f}")
+    c2.metric("Saídas (Efetivadas)", f"R$ {saidas_realizadas:,.2f}")
     
     if saldo_realizado >= 0:
         c3.success(f"Saldo Efetivado: R$ {saldo_realizado:,.2f}")
     else:
         c3.error(f"Saldo Efetivado: R$ {saldo_realizado:,.2f}")
 
-    c4.warning(f"Contas em Aberto: R$ {saidas_pendentes:,.2f}")
+    c4.warning(f"Contas a Pagar (Aberto): R$ {saidas_pendentes:,.2f}")
 
     # --- GRÁFICO DINÂMICO ---
     cores_mapa = {"Entrada": "#00c853", "Saída": "#ff2b2b"}
@@ -308,8 +370,8 @@ if not df.empty:
         grafico.update_xaxes(type='category')
         st.plotly_chart(grafico, use_container_width=True)
 
-    # --- HISTÓRICO E EXPORTAÇÃO DE PDF ---
-    st.subheader("📄 Histórico de Lançamentos")
+    # --- HISTÓRICO E GESTÃO DE CONTAS ---
+    st.subheader("📄 Gestão de Lançamentos e Contas a Pagar")
     
     col_search, col_pdf = st.columns([3, 1])
     with col_search:
@@ -338,12 +400,12 @@ if not df.empty:
             use_container_width=True
         )
 
-    # --- TABELA INTERATIVA DE AÇÃO ---
-    df_exibicao = df_filtrado.sort_values(by="Data", ascending=False).copy()
+    # TABELA DE EXIBIÇÃO
+    df_exibicao = df_filtrado.sort_values(by="Data", ascending=True).copy()
     
     if not df_exibicao.empty:
         c_hdr = st.columns([1.5, 2.5, 2, 1.5, 1.5, 1.5, 2])
-        c_hdr[0].markdown("**Data**")
+        c_hdr[0].markdown("**Vencimento**")
         c_hdr[1].markdown("**Descrição**")
         c_hdr[2].markdown("**Categoria**")
         c_hdr[3].markdown("**Tipo**")
@@ -367,11 +429,11 @@ if not df.empty:
             status_atual = str(row["Status"]).strip()
             
             if status_atual == "Fechado":
-                cols[5].markdown("✅ **Fechado**")
-                lbl_btn = "Abrir Conta"
+                cols[5].markdown("✅ **Pago / Fechado**")
+                lbl_btn = "Reabrir Conta"
             else:
                 cols[5].markdown("⏳ **Em Aberto**")
-                lbl_btn = "Fechar Conta"
+                lbl_btn = "💳 Baixar / Pagar"
             
             if cols[6].button(lbl_btn, key=f"btn_sheet_{row['_linha_sheet']}"):
                 alternar_status_transacao(row["_linha_sheet"], status_atual)
