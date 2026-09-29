@@ -8,69 +8,269 @@ from fpdf import FPDF
 # Configuração da página
 st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="💰")
 
-# --- ESTILIZAÇÃO CSS AVANÇADA E CLEAN ---
+# --- ESTILIZAÇÃO CSS CUSTOMIZADA PARA OS KPI CARDS ---
 st.markdown("""
     <style>
-    /* Remove margens topo da página */
-    .block-container {
-        padding-top: 2rem !important;
-        padding-bottom: 2rem !important;
+    .kpi-container {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 25px;
     }
-    
-    /* Esconde menu nativo e rodapé do Streamlit */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-
-    /* KPI Cards - Tema Clean/Light */
     .kpi-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
+        background-color: #1E222D;
+        border: 1px solid #2E3440;
         border-radius: 12px;
-        padding: 16px 18px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        transition: all 0.25s ease-in-out;
+        padding: 18px 20px;
+        flex: 1;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        transition: transform 0.2s ease, border-color 0.2s ease;
     }
     .kpi-card:hover {
         transform: translateY(-3px);
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
-        border-color: #CBD5E1;
+        border-color: #4C566A;
     }
     .kpi-title {
-        color: #64748B;
-        font-size: 0.78rem;
+        color: #88C0D0;
+        font-size: 0.82rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.8px;
         margin-bottom: 6px;
     }
     .kpi-value {
-        color: #1E293B;
-        font-size: 1.6rem;
+        color: #ECEFF4;
+        font-size: 1.65rem;
         font-weight: 700;
         margin: 0;
         line-height: 1.2;
     }
     .kpi-sub {
-        color: #64748B;
-        font-size: 0.75rem;
+        color: #D8DEE9;
+        font-size: 0.78rem;
         margin-top: 8px;
-        font-weight: 500;
-    }
-
-    /* Estilização Customizada das Abas */
-    button[data-baseweb="tab"] {
-        border-radius: 8px 8px 0 0 !important;
-        padding: 10px 16px !important;
-        font-weight: 600 !important;
-    }
-    button[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #F1F5F9 !important;
-        color: #0F172A !important;
-        border-bottom: 3px solid #2563EB !important;
+        opacity: 0.8;
     }
     </style>
 """, unsafe_allow_html=True)
+
+# --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
+def get_connection():
+    return sqlite3.connect("financeiro.db")
+
+def init_db():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS lancamentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data TEXT,
+            descricao TEXT,
+            categoria TEXT,
+            tipo TEXT,
+            valor REAL,
+            status TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def carregar_dados():
+    conn = get_connection()
+    df = pd.read_sql_query("SELECT * FROM lancamentos ORDER BY data ASC, id ASC", conn)
+    conn.close()
+    return df
+
+def salvar_lancamentos(df_novos):
+    conn = get_connection()
+    df_novos.to_sql("lancamentos", conn, if_exists="append", index=False)
+    conn.commit()
+    conn.close()
+
+def atualizar_status(id_registro, novo_status):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE lancamentos SET status = ? WHERE id = ?", (novo_status, id_registro))
+    conn.commit()
+    conn.close()
+
+def excluir_registro(id_registro):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM lancamentos WHERE id = ?", (id_registro,))
+    conn.commit()
+    conn.close()
+
+# --- CLASSE PARA GERAÇÃO DO PDF ---
+class RelatorioPDF(FPDF):
+    def __init__(self, titulo_periodo):
+        super().__init__(orientation='P', unit='mm', format='A4')
+        self.titulo_periodo = titulo_periodo
+
+    def header(self):
+        self.set_fill_color(31, 78, 121)
+        self.rect(0, 0, 210, 25, 'F')
+        self.set_font('Helvetica', 'B', 16)
+        self.set_text_color(255, 255, 255)
+        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.set_font('Helvetica', 'I', 10)
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.ln(10)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Helvetica', 'I', 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y às %H:%M")} | Página {self.page_no()}/{{nb}}', align='C')
+
+def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, aberto):
+    pdf = RelatorioPDF(titulo_periodo)
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    
+    # Quadro Resumo
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_text_color(31, 78, 121)
+    pdf.cell(0, 8, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
+    
+    pdf.set_font('Helvetica', '', 10)
+    pdf.set_text_color(0, 0, 0)
+    
+    pdf.set_fill_color(240, 243, 246)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.rect(10, pdf.get_y(), 190, 20, 'FD')
+    
+    y_start = pdf.get_y() + 4
+    pdf.set_y(y_start)
+    pdf.cell(47.5, 6, f'Entradas: R$ {total_ent:,.2f}', align='C')
+    pdf.cell(47.5, 6, f'Saídas: R$ {total_sai:,.2f}', align='C')
+    pdf.cell(47.5, 6, f'Saldo Líquido: R$ {saldo:,.2f}', align='C')
+    pdf.cell(47.5, 6, f'Em Aberto: R$ {aberto:,.2f}', align='C')
+    
+    pdf.set_y(y_start + 20)
+
+    # Tabela
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_text_color(31, 78, 121)
+    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(2)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_fill_color(31, 78, 121)
+    pdf.set_text_color(255, 255, 255)
+    
+    larguras = [25, 65, 35, 20, 25, 20]
+    colunas = ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Status']
+    
+    for idx, col in enumerate(colunas):
+        align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
+        pdf.cell(larguras[idx], 8, col, fill=True, border=1, align=align)
+    pdf.ln()
+
+    pdf.set_font('Helvetica', '', 8)
+    pdf.set_text_color(0, 0, 0)
+    
+    fill = False
+    
+    registos = df_periodo.to_dict('records')
+    for row in registos:
+        try:
+            data_str = datetime.strptime(str(row['data']), '%Y-%m-%d').strftime('%d/%m/%Y')
+        except Exception:
+            data_str = str(row['data'])
+            
+        valor_str = f"R$ {float(row['valor']):,.2f}"
+        
+        pdf.set_fill_color(245, 247, 250) if fill else pdf.set_fill_color(255, 255, 255)
+        
+        _ = pdf.cell(larguras[0], 7, data_str, border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[1], 7, str(row['descricao'])[:35], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[2], 7, str(row['categoria'])[:20], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[3], 7, str(row['tipo']), border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[4], 7, valor_str, border=1, align='R', fill=fill)
+        _ = pdf.cell(larguras[5], 7, str(row['status']), border=1, align='C', fill=fill)
+        _ = pdf.ln()
+        
+        fill = not fill
+
+    pdf_bytes = bytes(pdf.output())
+    return pdf_bytes
+
+# Inicializa o banco de dados
+init_db()
+
+st.title("💰 Controle Financeiro Integrado")
+
+# Mapeamento auxiliar de meses
+meses_pt = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
+    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
+    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
+}
+
+# --- RESUMO PAINEL DE KPI CARDS ---
+df_todos = carregar_dados()
+
+st.markdown("### 📊 Visão Geral do Caixa (Geral)")
+if not df_todos.empty:
+    total_entradas = df_todos[df_todos['tipo'] == 'Entrada']['valor'].sum()
+    total_saidas = df_todos[df_todos['tipo'] == 'Saída']['valor'].sum()
+    saldo_atual = total_entradas - total_saidas
+    
+    em_aberto = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
+    pago_fechado = df_todos[df_todos['status'] == 'Pago']['valor'].sum()
+
+    cor_saldo = "#A3BE8C" if saldo_atual >= 0 else "#BF616A"
+
+    col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
+    
+    with col_k1:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #A3BE8C;">
+                <div class="kpi-title">Total Entradas</div>
+                <div class="kpi-value">R$ {total_entradas:,.2f}</div>
+                <div class="kpi-sub">📈 Lançamentos confirmados</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k2:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #BF616A;">
+                <div class="kpi-title">Total Saídas</div>
+                <div class="kpi-value">R$ {total_saidas:,.2f}</div>
+                <div class="kpi-sub">📉 Despesas registradas</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k3:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid {cor_saldo};">
+                <div class="kpi-title">Saldo Líquido</div>
+                <div class="kpi-value" style="color: {cor_saldo};">R$ {saldo_atual:,.2f}</div>
+                <div class="kpi-sub">⚖️ Resultado de caixa</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k4:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #EBCB8B;">
+                <div class="kpi-title">Contas em Aberto</div>
+                <div class="kpi-value" style="color: #EBCB8B;">R$ {em_aberto:,.2f}</div>
+                <div class="kpi-sub">⚠️ Pendente de pagamento</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k5:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #88C0D0;">
+                <div class="kpi-title">Contas Pagas</div>
+                <div class="kpi-value">R$ {pago_fechado:,.2f}</div>
+                <div class="kpi-sub">✅ Baixas efetuadas</div>
+            </div>
+        """, unsafe_allow_html=True)
+else:
+    st.info("Nenhum lançamento registrado até o momento.")
+
+st.divider()
 
 # --- NAVEGAÇÃO POR ABAS ---
 aba1, aba2, aba3, aba4 = st.tabs([
