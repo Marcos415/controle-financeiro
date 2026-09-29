@@ -4,16 +4,21 @@ import sqlite3
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
+import plotly.express as px
 
 # Configuração da página
-st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="💰")
+st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="📊")
+
+# --- FUNÇÃO DE FORMATAÇÃO EM REAIS (BRL) ---
+def formata_brl(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # --- ESTILIZAÇÃO CSS AVANÇADA E CLEAN ---
 st.markdown("""
     <style>
     /* Otimização de margens superiores da página */
     .block-container {
-        padding-top: 2rem !important;
+        padding-top: 1.8rem !important;
         padding-bottom: 2rem !important;
     }
     
@@ -22,56 +27,57 @@ st.markdown("""
     footer {visibility: hidden;}
     header {visibility: hidden;}
 
-    /* KPI Cards - Tema Clean/Light Harmonizado */
+    /* KPI Cards - Estilo SaaS Clean */
     .kpi-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
-        border-radius: 12px;
-        padding: 16px 18px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-        transition: all 0.25s ease-in-out;
+        border-radius: 10px;
+        padding: 14px 16px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        transition: all 0.2s ease-in-out;
     }
     .kpi-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
         border-color: #CBD5E1;
     }
     .kpi-title {
         color: #64748B;
-        font-size: 0.78rem;
+        font-size: 0.75rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.5px;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
     }
     .kpi-value {
-        font-size: 1.6rem;
+        font-size: 1.45rem;
         font-weight: 700;
         margin: 0;
         line-height: 1.2;
     }
     .kpi-sub {
         color: #64748B;
-        font-size: 0.75rem;
-        margin-top: 8px;
+        font-size: 0.72rem;
+        margin-top: 6px;
         font-weight: 500;
     }
 
     /* Estilização das Abas (Tabs) */
     button[data-baseweb="tab"] {
-        border-radius: 8px 8px 0 0 !important;
-        padding: 10px 16px !important;
+        border-radius: 6px 6px 0 0 !important;
+        padding: 8px 16px !important;
         font-weight: 600 !important;
+        font-size: 0.9rem !important;
     }
     button[data-baseweb="tab"][aria-selected="true"] {
         background-color: #F1F5F9 !important;
-        color: #0F172A !important;
+        color: #1E293B !important;
         border-bottom: 3px solid #2563EB !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
+# --- CONEXÃO E BANCO DE DADOS ---
 def get_connection():
     return sqlite3.connect("financeiro.db")
 
@@ -118,7 +124,7 @@ def excluir_registro(id_registro):
     conn.commit()
     conn.close()
 
-# --- CLASSE PARA GERAÇÃO DO PDF ---
+# --- CLASSE PARA RELATÓRIO PDF ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -126,13 +132,13 @@ class RelatorioPDF(FPDF):
 
     def header(self):
         self.set_fill_color(31, 78, 121)
-        self.rect(0, 0, 210, 25, 'F')
-        self.set_font('Helvetica', 'B', 16)
+        self.rect(0, 0, 210, 22, 'F')
+        self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 8, 'RELATÓRIO FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
-        self.set_font('Helvetica', 'I', 10)
+        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.set_font('Helvetica', 'I', 9)
         self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
-        self.ln(10)
+        self.ln(8)
 
     def footer(self):
         self.set_y(-15)
@@ -145,465 +151,361 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
     pdf.alias_nb_pages()
     pdf.add_page()
     
-    # Quadro Resumo
-    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 7, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
     
-    pdf.set_font('Helvetica', '', 10)
+    pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(245, 247, 250)
+    pdf.set_draw_color(210, 215, 220)
+    pdf.rect(10, pdf.get_y(), 190, 18, 'FD')
     
-    pdf.set_fill_color(240, 243, 246)
-    pdf.set_draw_color(200, 200, 200)
-    pdf.rect(10, pdf.get_y(), 190, 20, 'FD')
-    
-    y_start = pdf.get_y() + 4
+    y_start = pdf.get_y() + 3
     pdf.set_y(y_start)
-    pdf.cell(47.5, 6, f'Entradas: R$ {total_ent:,.2f}', align='C')
-    pdf.cell(47.5, 6, f'Saídas: R$ {total_sai:,.2f}', align='C')
-    pdf.cell(47.5, 6, f'Saldo Líquido: R$ {saldo:,.2f}', align='C')
-    pdf.cell(47.5, 6, f'Em Aberto: R$ {aberto:,.2f}', align='C')
+    pdf.cell(47.5, 5, f'Entradas: {formata_brl(total_ent)}', align='C')
+    pdf.cell(47.5, 5, f'Saídas: {formata_brl(total_sai)}', align='C')
+    pdf.cell(47.5, 5, f'Saldo Líquido: {formata_brl(saldo)}', align='C')
+    pdf.cell(47.5, 5, f'Em Aberto: {formata_brl(aberto)}', align='C')
     
-    pdf.set_y(y_start + 20)
+    pdf.set_y(y_start + 18)
 
-    # Tabela
-    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 8, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
-    pdf.ln(2)
+    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
+    pdf.ln(1)
 
-    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_font('Helvetica', 'B', 8)
     pdf.set_fill_color(31, 78, 121)
     pdf.set_text_color(255, 255, 255)
     
-    larguras = [25, 65, 35, 20, 25, 20]
+    larguras = [22, 68, 35, 18, 27, 20]
     colunas = ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Status']
     
     for idx, col in enumerate(colunas):
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
-        pdf.cell(larguras[idx], 8, col, fill=True, border=1, align=align)
+        pdf.cell(larguras[idx], 7, col, fill=True, border=1, align=align)
     pdf.ln()
 
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(0, 0, 0)
     
     fill = False
-    
-    registos = df_periodo.to_dict('records')
-    for row in registos:
+    for _, row in df_periodo.iterrows():
         try:
             data_str = datetime.strptime(str(row['data']), '%Y-%m-%d').strftime('%d/%m/%Y')
         except Exception:
             data_str = str(row['data'])
             
-        valor_str = f"R$ {float(row['valor']):,.2f}"
+        valor_str = formata_brl(float(row['valor']))
+        pdf.set_fill_color(248, 249, 250) if fill else pdf.set_fill_color(255, 255, 255)
         
-        pdf.set_fill_color(245, 247, 250) if fill else pdf.set_fill_color(255, 255, 255)
-        
-        _ = pdf.cell(larguras[0], 7, data_str, border=1, align='C', fill=fill)
-        _ = pdf.cell(larguras[1], 7, str(row['descricao'])[:35], border=1, align='L', fill=fill)
-        _ = pdf.cell(larguras[2], 7, str(row['categoria'])[:20], border=1, align='L', fill=fill)
-        _ = pdf.cell(larguras[3], 7, str(row['tipo']), border=1, align='C', fill=fill)
-        _ = pdf.cell(larguras[4], 7, valor_str, border=1, align='R', fill=fill)
-        _ = pdf.cell(larguras[5], 7, str(row['status']), border=1, align='C', fill=fill)
-        _ = pdf.ln()
-        
+        pdf.cell(larguras[0], 6.5, data_str, border=1, align='C', fill=fill)
+        pdf.cell(larguras[1], 6.5, str(row['descricao'])[:36], border=1, align='L', fill=fill)
+        pdf.cell(larguras[2], 6.5, str(row['categoria'])[:20], border=1, align='L', fill=fill)
+        pdf.cell(larguras[3], 6.5, str(row['tipo']), border=1, align='C', fill=fill)
+        pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
+        pdf.cell(larguras[5], 6.5, str(row['status']), border=1, align='C', fill=fill)
+        pdf.ln()
         fill = not fill
 
-    pdf_bytes = bytes(pdf.output())
-    return pdf_bytes
+    return bytes(pdf.output())
 
-# Inicializa o banco de dados
+# Inicialização
 init_db()
 
-st.title("💰 Controle Financeiro Integrado")
-
-# Mapeamento auxiliar de meses
 meses_pt = {
     1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
     5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
     9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
 }
 
-# --- RESUMO PAINEL DE KPI CARDS ---
+# --- BARRA LATERAL (SIDEBAR) ---
+st.sidebar.title("⚙️ Painel de Controle")
+st.sidebar.markdown("---")
+
 df_todos = carregar_dados()
 
-st.markdown("### 📊 Visão Geral do Caixa (Geral)")
+if not df_todos.empty:
+    df_todos['datetime'] = pd.to_datetime(df_todos['data'])
+    df_todos['Ano'] = df_todos['datetime'].dt.year
+    df_todos['Mês_Num'] = df_todos['datetime'].dt.month
+    df_todos['Mês_Nome'] = df_todos['Mês_Num'].map(meses_pt)
+
+    st.sidebar.subheader("📌 Filtros do Relatório")
+    anos_disp = sorted(list(df_todos['Ano'].unique()), reverse=True)
+    ano_sel = st.sidebar.selectbox("Ano de Referência", anos_disp, key="side_ano")
+    
+    opcao_periodo = st.sidebar.radio("Visão Visual", ["Mensal", "Ano Todo (Acumulado)"], key="side_visao")
+    
+    if opcao_periodo == "Mensal":
+        meses_disp = [meses_pt[m] for m in sorted(df_todos[df_todos['Ano'] == ano_sel]['Mês_Num'].unique())]
+        mes_sel_nome = st.sidebar.selectbox("Mês de Referência", meses_disp, key="side_mes")
+    else:
+        mes_sel_nome = "Todos"
+
+    # Alerta Inteligente
+    aberto_total = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
+    if aberto_total > 0:
+        st.sidebar.markdown("---")
+        st.sidebar.warning(f"⚠️ **Atenção:** Você possui **{formata_brl(aberto_total)}** em contas pendentes!")
+
+# --- CORPO PRINCIPAL ---
+st.title("💼 Dashboard de Gestão Financeira")
+
 if not df_todos.empty:
     total_entradas = df_todos[df_todos['tipo'] == 'Entrada']['valor'].sum()
     total_saidas = df_todos[df_todos['tipo'] == 'Saída']['valor'].sum()
     saldo_atual = total_entradas - total_saidas
-    
     em_aberto = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
     pago_fechado = df_todos[df_todos['status'] == 'Pago']['valor'].sum()
 
     cor_saldo_texto = "#15803D" if saldo_atual >= 0 else "#B91C1C"
     cor_saldo_borda = "#16A34A" if saldo_atual >= 0 else "#DC2626"
 
-    col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
+    # 5 KPI Cards Superiores
+    c1, c2, c3, c4, c5 = st.columns(5)
     
-    with col_k1:
+    with c1:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #16A34A;">
+            <div class="kpi-card" style="border-left: 4px solid #16A34A;">
                 <div class="kpi-title">Total Entradas</div>
-                <div class="kpi-value" style="color: #15803D;">R$ {total_entradas:,.2f}</div>
-                <div class="kpi-sub">📈 Lançamentos confirmados</div>
+                <div class="kpi-value" style="color: #15803D;">{formata_brl(total_entradas)}</div>
+                <div class="kpi-sub">📈 Receitas confirmadas</div>
             </div>
         """, unsafe_allow_html=True)
 
-    with col_k2:
+    with c2:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #DC2626;">
+            <div class="kpi-card" style="border-left: 4px solid #DC2626;">
                 <div class="kpi-title">Total Saídas</div>
-                <div class="kpi-value" style="color: #B91C1C;">R$ {total_saidas:,.2f}</div>
-                <div class="kpi-sub">📉 Despesas registradas</div>
+                <div class="kpi-value" style="color: #B91C1C;">{formata_brl(total_saidas)}</div>
+                <div class="kpi-sub">📉 Despesas executadas</div>
             </div>
         """, unsafe_allow_html=True)
 
-    with col_k3:
+    with c3:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid {cor_saldo_borda};">
+            <div class="kpi-card" style="border-left: 4px solid {cor_saldo_borda};">
                 <div class="kpi-title">Saldo Líquido</div>
-                <div class="kpi-value" style="color: {cor_saldo_texto};">R$ {saldo_atual:,.2f}</div>
-                <div class="kpi-sub">⚖️ Resultado de caixa</div>
+                <div class="kpi-value" style="color: {cor_saldo_texto};">{formata_brl(saldo_atual)}</div>
+                <div class="kpi-sub">⚖️ Balanço geral</div>
             </div>
         """, unsafe_allow_html=True)
 
-    with col_k4:
+    with c4:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #D97706;">
+            <div class="kpi-card" style="border-left: 4px solid #D97706;">
                 <div class="kpi-title">Contas em Aberto</div>
-                <div class="kpi-value" style="color: #B45309;">R$ {em_aberto:,.2f}</div>
-                <div class="kpi-sub">⚠️ Pendente de pagamento</div>
+                <div class="kpi-value" style="color: #B45309;">{formata_brl(em_aberto)}</div>
+                <div class="kpi-sub">⏳ Pendente de baixa</div>
             </div>
         """, unsafe_allow_html=True)
 
-    with col_k5:
+    with c5:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #2563EB;">
+            <div class="kpi-card" style="border-left: 4px solid #2563EB;">
                 <div class="kpi-title">Contas Pagas</div>
-                <div class="kpi-value" style="color: #1D4ED8;">R$ {pago_fechado:,.2f}</div>
+                <div class="kpi-value" style="color: #1D4ED8;">{formata_brl(pago_fechado)}</div>
                 <div class="kpi-sub">✅ Baixas efetuadas</div>
             </div>
         """, unsafe_allow_html=True)
-else:
-    st.info("Nenhum lançamento registrado até o momento.")
 
-st.divider()
+st.markdown("<br>", unsafe_allow_html=True)
 
 # --- NAVEGAÇÃO POR ABAS ---
 aba1, aba2, aba3, aba4 = st.tabs([
-    "➕ Lançamento Único", 
-    "🔄 Lançamento Parcelado / Recorrente", 
-    "📋 Contas e Baixa de Pagamentos",
-    "📅 Relatórios Mensais / Anuais"
+    "➕ Novo Lançamento", 
+    "🔄 Parcelamento / Recorrente", 
+    "📋 Contas & Baixas",
+    "📊 Relatórios & Gráficos"
 ])
 
-# -------------------------------------------------------------
 # ABA 1: LANÇAMENTO ÚNICO
-# -------------------------------------------------------------
 with aba1:
-    st.header("Novo Lançamento Único")
+    st.subheader("Registrar Lançamento Avulso")
     col1, col2 = st.columns(2)
-    
     with col1:
-        data_unica = st.date_input("Data", value=datetime.today(), key="data_unica")
-        descricao_unica = st.text_input("Descrição", key="desc_unica")
-        categoria_unica = st.text_input("Categoria", key="cat_unica")
-        
+        data_u = st.date_input("Data de Vencimento", value=datetime.today(), key="data_u")
+        desc_u = st.text_input("Descrição", key="desc_u", placeholder="Ex: Conta de Luz")
+        cat_u = st.text_input("Categoria", key="cat_u", placeholder="Ex: Utilidades")
     with col2:
-        tipo_unico = st.selectbox("Tipo", ["Saída", "Entrada"], key="tipo_unico")
-        valor_unico = st.number_input("Valor (R$)", min_value=0.01, value=100.00, format="%.2f", key="valor_unico")
-        status_unico = st.selectbox("Status", ["Aberto", "Pago"], key="status_unico")
+        tipo_u = st.selectbox("Tipo", ["Saída", "Entrada"], key="tipo_u")
+        valor_u = st.number_input("Valor (R$)", min_value=0.01, value=100.00, format="%.2f", key="val_u")
+        status_u = st.selectbox("Status Inicial", ["Aberto", "Pago"], key="st_u")
 
-    if st.button("Salvar Lançamento Único"):
-        if not descricao_unica:
-            st.warning("Preencha a descrição do lançamento.")
+    if st.button("💾 Salvar Lançamento", use_container_width=True):
+        if not desc_u:
+            st.warning("Preencha a descrição antes de salvar.")
         else:
-            novo_registro = pd.DataFrame([{
-                "data": data_unica.strftime("%Y-%m-%d"),
-                "descricao": descricao_unica,
-                "categoria": categoria_unica,
-                "tipo": tipo_unico,
-                "valor": float(valor_unico),
-                "status": status_unico
+            novo = pd.DataFrame([{
+                "data": data_u.strftime("%Y-%m-%d"),
+                "descricao": desc_u,
+                "categoria": cat_u,
+                "tipo": tipo_u,
+                "valor": float(valor_u),
+                "status": status_u
             }])
-            salvar_lancamentos(novo_registro)
+            salvar_lancamentos(novo)
             st.success("Lançamento guardado com sucesso!")
             st.rerun()
 
-# -------------------------------------------------------------
-# ABA 2: LANÇAMENTO PARCELADO / RECORRENTE
-# -------------------------------------------------------------
+# ABA 2: PARCELADO
 with aba2:
-    st.header("Novo Lançamento Parcelado / Recorrente")
-    
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        data_1a_parcela = st.date_input("Data da 1ª Parcela", value=datetime.today(), key="data_parc")
-        descricao = st.text_input("Descrição (ex: Compra Notebook)", key="desc_parc")
-        categoria = st.text_input("Categoria", key="cat_parc")
-        tipo = st.selectbox("Tipo", ["Saída", "Entrada"], key="tipo_parc")
+    st.subheader("Registrar Parcelamento ou Recorrência")
+    col_l, col_r = st.columns(2)
+    with col_l:
+        data_p = st.date_input("Data da 1ª Parcela", value=datetime.today(), key="data_p")
+        desc_p = st.text_input("Descrição Base", key="desc_p", placeholder="Ex: Compra Equipamentos")
+        cat_p = st.text_input("Categoria", key="cat_p", placeholder="Ex: Investimentos")
+        tipo_p = st.selectbox("Tipo", ["Saída", "Entrada"], key="tipo_p")
+    with col_r:
+        regra_val = st.radio("Cálculo do Valor:", ["Valor Total (Dividir pelas parcelas)", "Valor Fixo por Parcela"], key="regra_v")
+        valor_dig = st.number_input("Valor (R$)", min_value=0.01, value=1200.00, format="%.2f", key="val_p")
+        qtd_p = st.number_input("Quantidade de Parcelas", min_value=1, value=12, step=1, key="qtd_p")
+        status_1a = st.selectbox("Status da 1ª Parcela", ["Aberto", "Pago"], key="st_p")
 
-    with col_right:
-        regra_valor = st.radio(
-            "Regra de Valor:",
-            ["Valor Total (Dividir pelas parcelas)", "Valor Fixado por Parcela"],
-            key="regra_valor"
-        )
-        valor_digitado = st.number_input("Valor Digitado (R$)", min_value=0.01, value=2000.00, step=100.0, format="%.2f", key="valor_digitado")
-        qtd_parcelas = st.number_input("Quantidade de Parcelas", min_value=1, value=12, step=1, key="qtd_parcelas")
-        status_1a_parcela = st.selectbox("Status da 1ª Parcela", ["Aberto", "Pago"], key="status_parc")
-
-    if st.button("Gerar e Salvar Parcelamento"):
-        if not descricao:
-            st.warning("Por favor, preencha a descrição do parcelamento.")
+    if st.button("🔄 Gerar Parcelamento", use_container_width=True):
+        if not desc_p:
+            st.warning("Preencha a descrição base.")
         else:
-            if regra_valor == "Valor Total (Dividir pelas parcelas)":
-                valor_parcela = valor_digitado / qtd_parcelas
-            else:
-                valor_parcela = valor_digitado
-
-            parcelas_geradas = []
-            for i in range(int(qtd_parcelas)):
-                data_vencimento = data_1a_parcela + relativedelta(months=i)
-                num_parcela_str = f"{i + 1}/{int(qtd_parcelas)}"
-                
-                st_parcela = status_1a_parcela if i == 0 else "Aberto"
-                
-                parcelas_geradas.append({
-                    "data": data_vencimento.strftime("%Y-%m-%d"),
-                    "descricao": f"{descricao} ({num_parcela_str})",
-                    "categoria": categoria,
-                    "tipo": tipo,
-                    "valor": round(valor_parcela, 2),
-                    "status": st_parcela
+            val_calc = (valor_dig / qtd_p) if regra_val == "Valor Total (Dividir pelas parcelas)" else valor_dig
+            lista = []
+            for i in range(int(qtd_p)):
+                venc = data_p + relativedelta(months=i)
+                st_parc = status_1a if i == 0 else "Aberto"
+                lista.append({
+                    "data": venc.strftime("%Y-%m-%d"),
+                    "descricao": f"{desc_p} ({i+1}/{int(qtd_p)})",
+                    "categoria": cat_p,
+                    "tipo": tipo_p,
+                    "valor": round(val_calc, 2),
+                    "status": st_parc
                 })
-            
-            df_parcelas = pd.DataFrame(parcelas_geradas)
-            salvar_lancamentos(df_parcelas)
-            
-            st.success(f"Geradas e gravadas {int(qtd_parcelas)} parcelas com sucesso!")
+            salvar_lancamentos(pd.DataFrame(lista))
+            st.success(f"Registradas {int(qtd_p)} parcelas com sucesso!")
             st.rerun()
 
-# -------------------------------------------------------------
 # ABA 3: EXTRATO E BAIXAS
-# -------------------------------------------------------------
 with aba3:
-    st.header("📋 Gerenciamento de Contas e Baixa de Pagamentos")
+    st.subheader("📋 Gestão de Extrato e Baixa Manual")
+    df_e = carregar_dados()
     
-    df_exibicao = carregar_dados()
-    
-    if not df_exibicao.empty:
-        df_exibicao['datetime'] = pd.to_datetime(df_exibicao['data'])
-        df_exibicao['Ano'] = df_exibicao['datetime'].dt.year
-        df_exibicao['Mês_Num'] = df_exibicao['datetime'].dt.month
-        df_exibicao['Mês_Nome'] = df_exibicao['Mês_Num'].map(meses_pt)
+    if not df_e.empty:
+        df_e['datetime'] = pd.to_datetime(df_e['data'])
+        df_e['Ano'] = df_e['datetime'].dt.year
+        df_e['Mês_Nome'] = df_e['datetime'].dt.month.map(meses_pt)
 
-        st.subheader("🔍 Filtros de Busca")
-        
-        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-        
-        anos_disponiveis = ["Todos"] + sorted(list(df_exibicao['Ano'].unique()), reverse=True)
-        with col_f1:
-            filtro_ano = st.selectbox("Filtrar por Ano:", anos_disponiveis, key="extrato_ano")
-            
-        with col_f2:
-            if filtro_ano != "Todos":
-                meses_disp = [meses_pt[m] for m in sorted(df_exibicao[df_exibicao['Ano'] == filtro_ano]['Mês_Num'].unique())]
-                meses_opcoes = ["Todos"] + meses_disp
-            else:
-                meses_opcoes = ["Todos"] + list(meses_pt.values())
-            filtro_mes = st.selectbox("Filtrar por Mês:", meses_opcoes, key="extrato_mes")
-            
-        with col_f3:
-            filtro_status = st.multiselect(
-                "Filtrar por Status", 
-                options=list(df_exibicao["status"].unique()), 
-                default=list(df_exibicao["status"].unique()),
-                key="extrato_status"
-            )
-            
-        with col_f4:
-            filtro_tipo = st.multiselect(
-                "Filtrar por Tipo", 
-                options=list(df_exibicao["tipo"].unique()), 
-                default=list(df_exibicao["tipo"].unique()),
-                key="extrato_tipo"
-            )
-            
-        df_filtrado = df_exibicao[
-            (df_exibicao["status"].isin(filtro_status)) & 
-            (df_exibicao["tipo"].isin(filtro_tipo))
-        ]
-        
-        if filtro_ano != "Todos":
-            df_filtrado = df_filtrado[df_filtrado['Ano'] == filtro_ano]
-            
-        if filtro_mes != "Todos":
-            df_filtrado = df_filtrado[df_filtrado['Mês_Nome'] == filtro_mes]
+        f1, f2, f3 = st.columns([2, 2, 3])
+        with f1:
+            st_filtro = st.multiselect("Filtrar Status", df_e['status'].unique(), default=df_e['status'].unique())
+        with f2:
+            tp_filtro = st.multiselect("Filtrar Tipo", df_e['tipo'].unique(), default=df_e['tipo'].unique())
+        with f3:
+            busca = st.text_input("🔍 Pesquisar por Descrição ou Categoria", placeholder="Digite algo...")
 
-        st.divider()
+        df_f = df_e[(df_e['status'].isin(st_filtro)) & (df_e['tipo'].isin(tp_filtro))]
+        if busca:
+            df_f = df_f[df_f['descricao'].str.contains(busca, case=False) | df_f['categoria'].str.contains(busca, case=False)]
 
-        st.subheader("⚡ Dar Baixa ou Alterar Status")
-        
-        if not df_filtrado.empty:
-            col_a1, col_a2, col_a3 = st.columns([4, 2, 2])
+        st.markdown("---")
+        if not df_f.empty:
+            opts = {f"ID {r['id']} | {r['data']} | {r['descricao']} - {formata_brl(r['valor'])} [{r['status']}]": r['id'] for _, r in df_f.iterrows()}
             
-            opcoes_filtradas = {
-                f"ID {row['id']} | {row['data']} | {row['descricao']} - R$ {row['valor']:.2f} [{row['status']}]": row['id']
-                for _, row in df_filtrado.iterrows()
-            }
-            
-            with col_a1:
-                item_selecionado = st.selectbox(
-                    "Selecione o lançamento (baseado nos filtros atuais):",
-                    options=list(opcoes_filtradas.keys())
-                )
-                id_target = opcoes_filtradas[item_selecionado]
-                
-            with col_a2:
-                st.write(" ")
-                st.write(" ")
-                if st.button("✅ Marcar como PAGO"):
+            c_sel, c_btn1, c_btn2 = st.columns([5, 2, 2])
+            with c_sel:
+                item_sel = st.selectbox("Selecione um lançamento para alterar:", list(opts.keys()))
+                id_target = opts[item_sel]
+            with c_btn1:
+                st.write("")
+                st.write("")
+                if st.button("✅ Dar Baixa (PAGO)", use_container_width=True):
                     atualizar_status(id_target, "Pago")
-                    st.success("Status alterado para PAGO!")
+                    st.success("Atualizado para Pago!")
                     st.rerun()
-
-            with col_a3:
-                st.write(" ")
-                st.write(" ")
-                if st.button("🗑️ Excluir Lançamento"):
+            with c_btn2:
+                st.write("")
+                st.write("")
+                if st.button("🗑️ Excluir", use_container_width=True):
                     excluir_registro(id_target)
-                    st.warning("Lançamento excluído com sucesso!")
+                    st.warning("Registro excluído!")
                     st.rerun()
-        else:
-            st.info("Nenhum lançamento encontrado para os filtros selecionados.")
 
-        st.divider()
-        st.subheader("📊 Extrato de Contas")
-
-        with st.container(height=380):
             st.dataframe(
-                df_filtrado[['id', 'data', 'descricao', 'categoria', 'tipo', 'valor', 'status']],
-                column_config={
-                    "id": "ID",
-                    "data": "Data Vencimento",
-                    "descricao": "Descrição",
-                    "categoria": "Categoria",
-                    "tipo": "Tipo",
-                    "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-                    "status": "Status"
-                },
-                hide_index=True
+                df_f[['id', 'data', 'descricao', 'categoria', 'tipo', 'valor', 'status']],
+                column_config={"valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f")},
+                hide_index=True,
+                use_container_width=True
             )
-
+        else:
+            st.info("Nenhum lançamento encontrado com os filtros selecionados.")
     else:
-        st.info("Nenhum lançamento registrado até o momento.")
+        st.info("Nenhum lançamento cadastrado.")
 
-# -------------------------------------------------------------
-# ABA 4: RELATÓRIOS MENSAIS E ANUAIS
-# -------------------------------------------------------------
+# ABA 4: RELATÓRIOS & GRÁFICOS
 with aba4:
-    st.header("📅 Relatórios e Movimentação por Mês/Ano")
-    
-    df_relatorio = carregar_dados()
-    
-    if not df_relatorio.empty:
-        df_relatorio['datetime'] = pd.to_datetime(df_relatorio['data'])
-        df_relatorio['Ano'] = df_relatorio['datetime'].dt.year
-        df_relatorio['Mês_Num'] = df_relatorio['datetime'].dt.month
-        df_relatorio['Mês_Nome'] = df_relatorio['Mês_Num'].map(meses_pt)
-        
-        col_r1, col_r2, col_r3 = st.columns(3)
-        
-        anos_disponiveis = sorted(df_relatorio['Ano'].unique(), reverse=True)
-        with col_r1:
-            ano_sel = st.selectbox("Selecione o Ano:", anos_disponiveis, key="rel_ano")
-            
-        with col_r2:
-            opcao_periodo = st.radio("Visão do Relatório:", ["Mensal", "Ano Todo (Acumulado)"], horizontal=True, key="rel_opcao")
-            
-        with col_r3:
-            if opcao_periodo == "Mensal":
-                meses_do_ano = [meses_pt[m] for m in sorted(df_relatorio[df_relatorio['Ano'] == ano_sel]['Mês_Num'].unique())]
-                mes_sel_nome = st.selectbox("Selecione o Mês:", meses_do_ano, key="rel_mes")
-            else:
-                mes_sel_nome = "Todos"
-
-        df_filtrado_periodo = df_relatorio[df_relatorio['Ano'] == ano_sel]
+    if not df_todos.empty:
+        df_p = df_todos[df_todos['Ano'] == ano_sel]
         if opcao_periodo == "Mensal" and mes_sel_nome != "Todos":
-            df_filtrado_periodo = df_filtrado_periodo[df_filtrado_periodo['Mês_Nome'] == mes_sel_nome]
+            df_p = df_p[df_p['Mês_Nome'] == mes_sel_nome]
 
-        st.divider()
-
-        ent_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Entrada']['valor'].sum()
-        sai_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Saída']['valor'].sum()
+        ent_m = df_p[df_p['tipo'] == 'Entrada']['valor'].sum()
+        sai_m = df_p[df_p['tipo'] == 'Saída']['valor'].sum()
         saldo_m = ent_m - sai_m
-        aberto_m = df_filtrado_periodo[df_filtrado_periodo['status'] == 'Aberto']['valor'].sum()
+        aberto_m = df_p[df_p['status'] == 'Aberto']['valor'].sum()
 
-        st.subheader(f"📌 Resumo: {mes_sel_nome if opcao_periodo == 'Mensal' else 'Ano ' + str(ano_sel)}")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Entradas no Período", f"R$ {ent_m:,.2f}")
-        c2.metric("Saídas no Período", f"R$ {sai_m:,.2f}")
-        c3.metric("Saldo do Período", f"R$ {saldo_m:,.2f}")
-        c4.metric("A Vencer / Em Aberto", f"R$ {aberto_m:,.2f}")
-
-        st.divider()
+        st.subheader(f"📊 Análise Visual: {mes_sel_nome if opcao_periodo == 'Mensal' else 'Ano ' + str(ano_sel)}")
+        
+        # Gráficos com Plotly (Visual Moderno)
         col_g1, col_g2 = st.columns(2)
         
         with col_g1:
-            st.subheader("📊 Entradas vs. Saídas")
-            df_totais_tipo = df_filtrado_periodo.groupby('tipo')['valor'].sum().reset_index()
-            if not df_totais_tipo.empty:
-                st.bar_chart(df_totais_tipo.set_index('tipo'))
+            df_barras = df_p.groupby('tipo')['valor'].sum().reset_index()
+            if not df_barras.empty:
+                fig_bar = px.bar(
+                    df_barras, x='tipo', y='valor', color='tipo',
+                    color_discrete_map={'Entrada': '#16A34A', 'Saída': '#DC2626'},
+                    title="Entradas vs. Saídas (Período)",
+                    labels={'valor': 'Total (R$)', 'tipo': 'Tipo'}
+                )
+                fig_bar.update_layout(showlegend=False, margin=dict(l=20, r=20, t=40, b=20), height=320)
+                st.plotly_chart(fig_bar, use_container_width=True)
             else:
-                st.info("Sem dados suficientes para o gráfico.")
+                st.info("Sem dados para o gráfico comparativo.")
 
         with col_g2:
-            st.subheader("🏷️ Saídas por Categoria")
-            df_saidas_cat = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Saída'].groupby('categoria')['valor'].sum().reset_index()
-            if not df_saidas_cat.empty:
-                st.bar_chart(df_saidas_cat.set_index('categoria'))
+            df_cat = df_p[df_p['tipo'] == 'Saída'].groupby('categoria')['valor'].sum().reset_index()
+            if not df_cat.empty:
+                fig_pie = px.pie(
+                    df_cat, values='valor', names='categoria', hole=0.4,
+                    title="Distribuição de Saídas por Categoria"
+                )
+                fig_pie.update_layout(margin=dict(l=20, r=20, t=40, b=20), height=320)
+                st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("Nenhuma saída registrada no período.")
 
-        st.divider()
-        st.subheader("📋 Tabela do Período Selecionado")
+        st.markdown("---")
+        st.subheader("📋 Detalhamento em Tabela")
         
-        df_export = df_filtrado_periodo[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
+        df_exp = df_p[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
+        st.dataframe(df_exp, use_container_width=True, hide_index=True)
+
+        tit_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
         
-        with st.container(height=350):
-            st.dataframe(
-                df_export,
-                column_config={
-                    "data": "Data Vencimento",
-                    "descricao": "Descrição",
-                    "categoria": "Categoria",
-                    "tipo": "Tipo",
-                    "valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f"),
-                    "status": "Status"
-                },
-                hide_index=True
-            )
-
-        st.divider()
-        titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
-
-        if st.button("⚙️ Gerar Relatório PDF"):
-            pdf_data = gerar_pdf_isolado(df_export, titulo_doc, ent_m, sai_m, saldo_m, aberto_m)
-            st.session_state['pdf_pronto'] = pdf_data
-            st.session_state['pdf_nome'] = f"relatorio_financeiro_{ano_sel}_{mes_sel_nome}.pdf"
+        if st.button("⚙️ Gerar Relatório PDF Profissional", use_container_width=True):
+            pdf_bytes = gerar_pdf_isolado(df_exp, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
+            st.session_state['pdf_pronto'] = pdf_bytes
+            st.session_state['pdf_nome'] = f"relatorio_{ano_sel}_{mes_sel_nome}.pdf"
             st.rerun()
 
         if 'pdf_pronto' in st.session_state:
             st.download_button(
-                label="📥 Baixar Relatório Profissional em PDF",
+                label="📥 Baixar PDF Formatado",
                 data=st.session_state['pdf_pronto'],
                 file_name=st.session_state['pdf_nome'],
-                mime="application/pdf"
+                mime="application/pdf",
+                use_container_width=True
             )
-        
     else:
-        st.info("Nenhum dado disponível para gerar relatórios.")
+        st.info("Nenhum dado cadastrado para gerar relatórios.")
