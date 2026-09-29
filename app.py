@@ -8,47 +8,65 @@ from fpdf import FPDF
 # Configuração da página
 st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="💰")
 
-# --- ESTILIZAÇÃO CSS CUSTOMIZADA PARA OS KPI CARDS ---
+# --- ESTILIZAÇÃO CSS AVANÇADA E CLEAN ---
 st.markdown("""
     <style>
-    .kpi-container {
-        display: flex;
-        gap: 15px;
-        margin-bottom: 25px;
+    /* Otimização de margens superiores da página */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
     }
+    
+    /* Esconde marca d'água, menu nativo e rodapé do Streamlit */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* KPI Cards - Tema Clean/Light Harmonizado */
     .kpi-card {
-        background-color: #1E222D;
-        border: 1px solid #2E3440;
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
         border-radius: 12px;
-        padding: 18px 20px;
-        flex: 1;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-        transition: transform 0.2s ease, border-color 0.2s ease;
+        padding: 16px 18px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        transition: all 0.25s ease-in-out;
     }
     .kpi-card:hover {
         transform: translateY(-3px);
-        border-color: #4C566A;
+        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
+        border-color: #CBD5E1;
     }
     .kpi-title {
-        color: #88C0D0;
-        font-size: 0.82rem;
+        color: #64748B;
+        font-size: 0.78rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.8px;
+        letter-spacing: 0.5px;
         margin-bottom: 6px;
     }
     .kpi-value {
-        color: #ECEFF4;
-        font-size: 1.65rem;
+        font-size: 1.6rem;
         font-weight: 700;
         margin: 0;
         line-height: 1.2;
     }
     .kpi-sub {
-        color: #D8DEE9;
-        font-size: 0.78rem;
+        color: #64748B;
+        font-size: 0.75rem;
         margin-top: 8px;
-        opacity: 0.8;
+        font-weight: 500;
+    }
+
+    /* Estilização das Abas (Tabs) */
+    button[data-baseweb="tab"] {
+        border-radius: 8px 8px 0 0 !important;
+        padding: 10px 16px !important;
+        font-weight: 600 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #F1F5F9 !important;
+        color: #0F172A !important;
+        border-bottom: 3px solid #2563EB !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -219,51 +237,52 @@ if not df_todos.empty:
     em_aberto = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
     pago_fechado = df_todos[df_todos['status'] == 'Pago']['valor'].sum()
 
-    cor_saldo = "#A3BE8C" if saldo_atual >= 0 else "#BF616A"
+    cor_saldo_texto = "#15803D" if saldo_atual >= 0 else "#B91C1C"
+    cor_saldo_borda = "#16A34A" if saldo_atual >= 0 else "#DC2626"
 
     col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
     
     with col_k1:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #A3BE8C;">
+            <div class="kpi-card" style="border-left: 5px solid #16A34A;">
                 <div class="kpi-title">Total Entradas</div>
-                <div class="kpi-value">R$ {total_entradas:,.2f}</div>
+                <div class="kpi-value" style="color: #15803D;">R$ {total_entradas:,.2f}</div>
                 <div class="kpi-sub">📈 Lançamentos confirmados</div>
             </div>
         """, unsafe_allow_html=True)
 
     with col_k2:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #BF616A;">
+            <div class="kpi-card" style="border-left: 5px solid #DC2626;">
                 <div class="kpi-title">Total Saídas</div>
-                <div class="kpi-value">R$ {total_saidas:,.2f}</div>
+                <div class="kpi-value" style="color: #B91C1C;">R$ {total_saidas:,.2f}</div>
                 <div class="kpi-sub">📉 Despesas registradas</div>
             </div>
         """, unsafe_allow_html=True)
 
     with col_k3:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid {cor_saldo};">
+            <div class="kpi-card" style="border-left: 5px solid {cor_saldo_borda};">
                 <div class="kpi-title">Saldo Líquido</div>
-                <div class="kpi-value" style="color: {cor_saldo};">R$ {saldo_atual:,.2f}</div>
+                <div class="kpi-value" style="color: {cor_saldo_texto};">R$ {saldo_atual:,.2f}</div>
                 <div class="kpi-sub">⚖️ Resultado de caixa</div>
             </div>
         """, unsafe_allow_html=True)
 
     with col_k4:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #EBCB8B;">
+            <div class="kpi-card" style="border-left: 5px solid #D97706;">
                 <div class="kpi-title">Contas em Aberto</div>
-                <div class="kpi-value" style="color: #EBCB8B;">R$ {em_aberto:,.2f}</div>
+                <div class="kpi-value" style="color: #B45309;">R$ {em_aberto:,.2f}</div>
                 <div class="kpi-sub">⚠️ Pendente de pagamento</div>
             </div>
         """, unsafe_allow_html=True)
 
     with col_k5:
         st.markdown(f"""
-            <div class="kpi-card" style="border-left: 5px solid #88C0D0;">
+            <div class="kpi-card" style="border-left: 5px solid #2563EB;">
                 <div class="kpi-title">Contas Pagas</div>
-                <div class="kpi-value">R$ {pago_fechado:,.2f}</div>
+                <div class="kpi-value" style="color: #1D4ED8;">R$ {pago_fechado:,.2f}</div>
                 <div class="kpi-sub">✅ Baixas efetuadas</div>
             </div>
         """, unsafe_allow_html=True)
