@@ -7,3 +7,6 @@ openpyxl
 weasyprint
 python-dateutil
 fpdf2
+streamlit
+fpdf2
+python-dateutil
