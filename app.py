@@ -8,6 +8,51 @@ from fpdf import FPDF
 # Configuração da página
 st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="💰")
 
+# --- ESTILIZAÇÃO CSS CUSTOMIZADA PARA OS KPI CARDS ---
+st.markdown("""
+    <style>
+    .kpi-container {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 25px;
+    }
+    .kpi-card {
+        background-color: #1E222D;
+        border: 1px solid #2E3440;
+        border-radius: 12px;
+        padding: 18px 20px;
+        flex: 1;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .kpi-card:hover {
+        transform: translateY(-3px);
+        border-color: #4C566A;
+    }
+    .kpi-title {
+        color: #88C0D0;
+        font-size: 0.82rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 6px;
+    }
+    .kpi-value {
+        color: #ECEFF4;
+        font-size: 1.65rem;
+        font-weight: 700;
+        margin: 0;
+        line-height: 1.2;
+    }
+    .kpi-sub {
+        color: #D8DEE9;
+        font-size: 0.78rem;
+        margin-top: 8px;
+        opacity: 0.8;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
 def get_connection():
     return sqlite3.connect("financeiro.db")
@@ -162,7 +207,7 @@ meses_pt = {
     9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
 }
 
-# --- RESUMO PAINEL DE MÉTRICAS ---
+# --- RESUMO PAINEL DE KPI CARDS ---
 df_todos = carregar_dados()
 
 st.markdown("### 📊 Visão Geral do Caixa (Geral)")
@@ -174,12 +219,54 @@ if not df_todos.empty:
     em_aberto = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
     pago_fechado = df_todos[df_todos['status'] == 'Pago']['valor'].sum()
 
-    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-    col_m1.metric("Total Entradas", f"R$ {total_entradas:,.2f}")
-    col_m2.metric("Total Saídas", f"R$ {total_saidas:,.2f}")
-    col_m3.metric("Saldo Líquido", f"R$ {saldo_atual:,.2f}")
-    col_m4.metric("Contas em Aberto ⚠️", f"R$ {em_aberto:,.2f}")
-    col_m5.metric("Contas Pagas/Fechadas ✅", f"R$ {pago_fechado:,.2f}")
+    cor_saldo = "#A3BE8C" if saldo_atual >= 0 else "#BF616A"
+
+    col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5)
+    
+    with col_k1:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #A3BE8C;">
+                <div class="kpi-title">Total Entradas</div>
+                <div class="kpi-value">R$ {total_entradas:,.2f}</div>
+                <div class="kpi-sub">📈 Lançamentos confirmados</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k2:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #BF616A;">
+                <div class="kpi-title">Total Saídas</div>
+                <div class="kpi-value">R$ {total_saidas:,.2f}</div>
+                <div class="kpi-sub">📉 Despesas registradas</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k3:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid {cor_saldo};">
+                <div class="kpi-title">Saldo Líquido</div>
+                <div class="kpi-value" style="color: {cor_saldo};">R$ {saldo_atual:,.2f}</div>
+                <div class="kpi-sub">⚖️ Resultado de caixa</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k4:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #EBCB8B;">
+                <div class="kpi-title">Contas em Aberto</div>
+                <div class="kpi-value" style="color: #EBCB8B;">R$ {em_aberto:,.2f}</div>
+                <div class="kpi-sub">⚠️ Pendente de pagamento</div>
+            </div>
+        """, unsafe_allow_html=True)
+
+    with col_k5:
+        st.markdown(f"""
+            <div class="kpi-card" style="border-left: 5px solid #88C0D0;">
+                <div class="kpi-title">Contas Pagas</div>
+                <div class="kpi-value">R$ {pago_fechado:,.2f}</div>
+                <div class="kpi-sub">✅ Baixas efetuadas</div>
+            </div>
+        """, unsafe_allow_html=True)
 else:
     st.info("Nenhum lançamento registrado até o momento.")
 
@@ -282,7 +369,7 @@ with aba2:
             st.rerun()
 
 # -------------------------------------------------------------
-# ABA 3: EXTRATO E BAIXAS (COM FILTRO DE MÊS E ANO)
+# ABA 3: EXTRATO E BAIXAS
 # -------------------------------------------------------------
 with aba3:
     st.header("📋 Gerenciamento de Contas e Baixa de Pagamentos")
@@ -297,7 +384,6 @@ with aba3:
 
         st.subheader("🔍 Filtros de Busca")
         
-        # Filtros principais em 4 colunas
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         
         anos_disponiveis = ["Todos"] + sorted(list(df_exibicao['Ano'].unique()), reverse=True)
@@ -328,7 +414,6 @@ with aba3:
                 key="extrato_tipo"
             )
             
-        # Aplicação dos Filtros no DataFrame
         df_filtrado = df_exibicao[
             (df_exibicao["status"].isin(filtro_status)) & 
             (df_exibicao["tipo"].isin(filtro_tipo))
@@ -412,7 +497,6 @@ with aba4:
         df_relatorio['Mês_Num'] = df_relatorio['datetime'].dt.month
         df_relatorio['Mês_Nome'] = df_relatorio['Mês_Num'].map(meses_pt)
         
-        # Filtros
         col_r1, col_r2, col_r3 = st.columns(3)
         
         anos_disponiveis = sorted(df_relatorio['Ano'].unique(), reverse=True)
@@ -429,14 +513,12 @@ with aba4:
             else:
                 mes_sel_nome = "Todos"
 
-        # Filtragem dos Dados
         df_filtrado_periodo = df_relatorio[df_relatorio['Ano'] == ano_sel]
         if opcao_periodo == "Mensal" and mes_sel_nome != "Todos":
             df_filtrado_periodo = df_filtrado_periodo[df_filtrado_periodo['Mês_Nome'] == mes_sel_nome]
 
         st.divider()
 
-        # Métricas do Período
         ent_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Entrada']['valor'].sum()
         sai_m = df_filtrado_periodo[df_filtrado_periodo['tipo'] == 'Saída']['valor'].sum()
         saldo_m = ent_m - sai_m
@@ -449,7 +531,6 @@ with aba4:
         c3.metric("Saldo do Período", f"R$ {saldo_m:,.2f}")
         c4.metric("A Vencer / Em Aberto", f"R$ {aberto_m:,.2f}")
 
-        # Gráficos na tela
         st.divider()
         col_g1, col_g2 = st.columns(2)
         
@@ -488,7 +569,6 @@ with aba4:
                 hide_index=True
             )
 
-        # GERAÇÃO DO PDF ISOLADA
         st.divider()
         titulo_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
 
