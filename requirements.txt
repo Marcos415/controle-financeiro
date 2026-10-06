@@ -2,7 +2,7 @@ streamlit
 pandas
 psycopg2-binary
 python-dateutil
-fpdf
+fpdf2
 plotly
 google-generativeai
 audio-recorder-streamlit

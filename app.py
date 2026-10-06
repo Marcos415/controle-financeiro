@@ -153,7 +153,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- RELATÓRIO PDF ---
+# --- RELATÓRIO PDF (Compatível com fpdf2 e fpdf1) ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -164,9 +164,9 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', ln=1)
         self.set_font('Helvetica', 'I', 9)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', ln=1)
         self.ln(8)
 
     def footer(self):
@@ -182,7 +182,7 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
     
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 7, 'RESUMO DO PERÍODO', ln=1)
     
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(0, 0, 0)
@@ -201,7 +201,7 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
 
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
     pdf.ln(1)
 
     pdf.set_font('Helvetica', 'B', 8)
