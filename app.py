@@ -238,59 +238,11 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
         pdf.ln()
         fill = not fill
 
-    return bytes(pdf.output())
-
-# --- FUNÇÃO INTEGRAÇÃO IA (GEMINI) ---
-def obter_contexto_financeiro():
-    df = carregar_dados()
-    if df.empty:
-        return "O banco de dados financeiro está atualmente sem lançamentos registrados."
-    
-    total_ent = df[df['tipo'] == 'Entrada']['valor'].sum()
-    total_sai = df[df['tipo'] == 'Saída']['valor'].sum()
-    saldo = total_ent - total_sai
-    em_aberto = df[df['status'] == 'Aberto']['valor'].sum()
-    pagos = df[df['status'] == 'Pago']['valor'].sum()
-    
-    pendentes_df = df[df['status'] == 'Aberto'][['data', 'descricao', 'categoria', 'tipo', 'valor']].to_string(index=False)
-    ultimos_df = df.tail(10)[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].to_string(index=False)
-    
-    contexto = f"""
-    DADOS ATUAIS DO SISTEMA FINANCEIRO:
-    - Total Entradas Confirmadas: R$ {total_ent:,.2f}
-    - Total Saídas Registradas: R$ {total_sai:,.2f}
-    - Saldo Líquido Atual: R$ {saldo:,.2f}
-    - Valor Total em Aberto (A Pagar/Receber): R$ {em_aberto:,.2f}
-    - Valor Total Pago/Baixado: R$ {pagos:,.2f}
-    
-    LISTA DE CONTAS EM ABERTO:
-    {pendentes_df}
-    
-    ÚLTIMOS 10 LANÇAMENTOS REGISTRADOS:
-    {ultimos_df}
-    """
-    return contexto
-
-def consultar_ia_gemini(pergunta_usuario):
-    if not GEMINI_KEY:
-        return "⚠️ Chave de API do Gemini não configurada. Adicione 'GEMINI_API_KEY' nos secrets do Streamlit."
-    
-    contexto = obter_contexto_financeiro()
-    prompt = f"""
-    Você é um assistente financeiro pessoal inteligente e especialista em gestão.
-    Responda à pergunta do usuário com base estritamente nos dados do sistema abaixo.
-    Seja conciso, direto e formate todos os valores monetários no padrão brasileiro (R$ X.XXX,XX).
-
-    {contexto}
-
-    Pergunta do usuário: {pergunta_usuario}
-    """
-    try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Erro ao consultar o Gemini: {str(e)}"
+    # Tratamento seguro para FPDF1 e FPDF2
+    out = pdf.output()
+    if isinstance(out, str):
+        return out.encode('latin1')
+    return bytes(out)
 
 # Inicialização da base de dados no Neon
 init_db()
