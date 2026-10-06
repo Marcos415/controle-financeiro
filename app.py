@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
+import psycopg2
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
@@ -18,6 +18,75 @@ st.set_page_config(page_title="Controle Financeiro Integrado", layout="wide", pa
 GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
+
+# --- CONEXÃO COM O NEON POSTGRESQL ---
+DATABASE_URL = st.secrets.get("DATABASE_URL", os.environ.get("DATABASE_URL", ""))
+
+def get_connection():
+    if not DATABASE_URL:
+        st.error("⚠️ URL do banco de dados (DATABASE_URL) não encontrada nos Secrets do Streamlit!")
+        st.stop()
+    return psycopg2.connect(DATABASE_URL)
+
+def init_db():
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS lancamentos (
+                id SERIAL PRIMARY KEY,
+                data VARCHAR(10),
+                descricao TEXT,
+                categoria TEXT,
+                tipo VARCHAR(10),
+                valor NUMERIC(12,2),
+                status VARCHAR(10)
+            );
+        ''')
+        conn.commit()
+        c.close()
+        conn.close()
+    except Exception as e:
+        st.error(f"Erro ao ligar ao Neon PostgreSQL: {str(e)}")
+
+def carregar_dados():
+    try:
+        conn = get_connection()
+        df = pd.read_sql_query("SELECT * FROM lancamentos ORDER BY data ASC, id ASC", conn)
+        conn.close()
+        if not df.empty:
+            df['valor'] = df['valor'].astype(float)
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+def salvar_lancamentos(df_novos):
+    conn = get_connection()
+    c = conn.cursor()
+    for _, row in df_novos.iterrows():
+        c.execute('''
+            INSERT INTO lancamentos (data, descricao, categoria, tipo, valor, status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (str(row['data']), str(row['descricao']), str(row['categoria']), str(row['tipo']), float(row['valor']), str(row['status'])))
+    conn.commit()
+    c.close()
+    conn.close()
+
+def atualizar_status(id_registro, novo_status):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE lancamentos SET status = %s WHERE id = %s", (novo_status, int(id_registro)))
+    conn.commit()
+    c.close()
+    conn.close()
+
+def excluir_registro(id_registro):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM lancamentos WHERE id = %s", (int(id_registro),))
+    conn.commit()
+    c.close()
+    conn.close()
 
 # --- FUNÇÃO DE FORMATAÇÃO EM REAIS (BRL) ---
 def formata_brl(valor):
@@ -83,53 +152,6 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
-# --- BANCO DE DADOS ---
-def get_connection():
-    return sqlite3.connect("financeiro.db")
-
-def init_db():
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS lancamentos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            data TEXT,
-            descricao TEXT,
-            categoria TEXT,
-            tipo TEXT,
-            valor REAL,
-            status TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def carregar_dados():
-    conn = get_connection()
-    df = pd.read_sql_query("SELECT * FROM lancamentos ORDER BY data ASC, id ASC", conn)
-    conn.close()
-    return df
-
-def salvar_lancamentos(df_novos):
-    conn = get_connection()
-    df_novos.to_sql("lancamentos", conn, if_exists="append", index=False)
-    conn.commit()
-    conn.close()
-
-def atualizar_status(id_registro, novo_status):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE lancamentos SET status = ? WHERE id = ?", (novo_status, id_registro))
-    conn.commit()
-    conn.close()
-
-def excluir_registro(id_registro):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM lancamentos WHERE id = ?", (id_registro,))
-    conn.commit()
-    conn.close()
 
 # --- RELATÓRIO PDF ---
 class RelatorioPDF(FPDF):
@@ -270,7 +292,7 @@ def consultar_ia_gemini(pergunta_usuario):
     except Exception as e:
         return f"Erro ao consultar o Gemini: {str(e)}"
 
-# Inicialização
+# Inicialização da base de dados no Neon
 init_db()
 
 meses_pt = {
@@ -306,7 +328,7 @@ if not df_todos.empty:
     aberto_total = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
     if aberto_total > 0:
         st.sidebar.markdown("---")
-        st.sidebar.warning(f"⚠️️ **Atenção:** Você possui **{formata_brl(aberto_total)}** em contas pendentes!")
+        st.sidebar.warning(f"⚠️ **Atenção:** Possui **{formata_brl(aberto_total)}** em contas pendentes!")
 
 # --- CORPO PRINCIPAL ---
 st.title("💼 Dashboard de Gestão Financeira")
@@ -604,5 +626,5 @@ with aba5:
                 
                 st.write("🔊 **Ouvir resposta em áudio:**")
                 st.audio(fp, format='audio/mp3')
-            except Exception as e:
+            except Exception:
                 st.caption("Não foi possível gerar áudio no momento.")
