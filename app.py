@@ -4,6 +4,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import plotly.express as px
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 import google.generativeai as genai
 
@@ -52,13 +53,19 @@ def carregar_dados():
         df['data'] = pd.to_datetime(df['data'])
     return df
 
-def salvar_lancamento(data, descricao, categoria, tipo, valor, status):
+def salvar_lancamento(data, descricao, categoria, tipo, valor, status, parcelas=1):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO financas (data, descricao, categoria, tipo, valor, status)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (data, descricao, categoria, tipo, valor, status))
+    valor_parcela = round(valor / parcelas, 2)
+    
+    for i in range(parcelas):
+        data_parcela = data + relativedelta(months=i)
+        desc_final = f"{descricao} ({i+1}/{parcelas})" if parcelas > 1 else descricao
+        cur.execute("""
+            INSERT INTO financas (data, descricao, categoria, tipo, valor, status)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (data_parcela, desc_final, categoria, tipo, valor_parcela, status))
+        
     conn.commit()
     cur.close()
     conn.close()
@@ -74,7 +81,7 @@ def excluir_lancamento(id_registro):
 def formata_brl(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- CLASSE DE GERAÇÃO DE PDF ---
+# --- CLASSE DE GERAÇÃO DE PDF (COMPATÍVEL COM FPDF2) ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -85,9 +92,9 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', ln=1)
+        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
         self.set_font('Helvetica', 'I', 9)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', ln=1)
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
         self.ln(8)
 
     def footer(self):
@@ -96,14 +103,15 @@ class RelatorioPDF(FPDF):
         self.set_text_color(128, 128, 128)
         self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y às %H:%M")} | Página {self.page_no()}/{{nb}}', align='C')
 
-def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, aberto):
+def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, aberto):
     pdf = RelatorioPDF(titulo_periodo)
     pdf.alias_nb_pages()
     pdf.add_page()
     
+    # Resumo
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'RESUMO DO PERÍODO', ln=1)
+    pdf.cell(0, 7, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
     
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(0, 0, 0)
@@ -120,9 +128,10 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
     
     pdf.set_y(y_start + 18)
 
+    # Tabela
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
+    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
     pdf.ln(1)
 
     pdf.set_font('Helvetica', 'B', 8)
@@ -159,39 +168,35 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
         pdf.ln()
         fill = not fill
 
-    # Retorno compatível com FPDF1 e FPDF2 sem erro de tipo
-    saida = pdf.output()
-    if isinstance(saida, str):
-        return saida.encode('latin1')
-    elif isinstance(saida, (bytearray, bytes)):
-        return bytes(saida)
-    return bytes(saida)
+    # Retorna o buffer binário diretamente do FPDF2
+    return bytes(pdf.output())
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📊 Controle Financeiro Pessoal")
 
 df = carregar_dados()
 
-# BARRA LATERAL - NOVO LANÇAMENTO
+# BARRA LATERAL - NOVO LANÇAMENTO (COM PARCELAMENTO)
 st.sidebar.header("➕ Novo Lançamento")
 with st.sidebar.form("form_lancamento", clear_on_submit=True):
-    data_input = st.date_input("Data", datetime.today())
+    data_input = st.date_input("Data Inicial", datetime.today())
     desc_input = st.text_input("Descrição")
     cat_input = st.selectbox("Categoria", [
         "Alimentação", "Moradia", "Transporte", "Lazer", "Saúde", 
         "Educação", "Salário", "Investimentos", "Outros"
     ])
     tipo_input = st.selectbox("Tipo", ["Entrada", "Saída"])
-    valor_input = st.number_input("Valor (R$)", min_value=0.01, step=10.0, format="%.2f")
-    status_input = st.selectbox("Status", ["Pago", "Pendente"])
+    valor_input = st.number_input("Valor Total (R$)", min_value=0.01, step=10.0, format="%.2f")
+    parcelas_input = st.number_input("Número de Parcelas", min_value=1, max_value=72, value=1, step=1)
+    status_input = st.selectbox("Status da 1ª Parcela", ["Pago", "Pendente"])
     
     submetido = st.form_submit_button("Salvar Lançamento")
     if submetido:
         if desc_input.strip() == "":
             st.sidebar.error("Por favor, preencha a descrição.")
         else:
-            salvar_lancamento(data_input, desc_input, cat_input, tipo_input, valor_input, status_input)
-            st.sidebar.success("Lançamento salvo com sucesso!")
+            salvar_lancamento(data_input, desc_input, cat_input, tipo_input, valor_input, status_input, parcelas_input)
+            st.sidebar.success("Lançamento(s) salvo(s) com sucesso!")
             st.rerun()
 
 # ABAS DA APLICAÇÃO
@@ -203,7 +208,6 @@ aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "⚙️ Configurações"
 ])
 
-# MESES EM PORTUGUÊS
 meses_nome = {
     1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril", 5: "Maio", 6: "Junho",
     7: "Julho", 8: "Agosto", 9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
@@ -350,12 +354,12 @@ with aba4:
 
         st.divider()
         
-        # GERAÇÃO DIRETA DENTRO DO BOTÃO DE DOWNLOAD
-        pdf_bytes = gerar_pdf_isolado(df_pdf, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
+        # GERAR BYTES DIRETAMENTE
+        pdf_file_data = gerar_pdf_bytes(df_pdf, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
         
         st.download_button(
             label="📥 Baixar Relatório PDF Formatado",
-            data=pdf_bytes,
+            data=pdf_file_data,
             file_name=f"relatorio_financeiro_{ano_pdf}_{tit_doc.replace(' ', '_')}.pdf",
             mime="application/pdf",
             use_container_width=True
