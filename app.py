@@ -1,159 +1,80 @@
 import streamlit as st
 import pandas as pd
 import psycopg2
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
-from fpdf import FPDF
+from psycopg2.extras import RealDictCursor
 import plotly.express as px
+from datetime import datetime
+from fpdf import FPDF
 import google.generativeai as genai
-from audio_recorder_streamlit import audio_recorder
-from gtts import gTTS
-import io
-import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Controle Financeiro Integrado", layout="wide", page_icon="📊")
+st.set_page_config(
+    page_title="Controle Financeiro Pessoal",
+    page_icon="💰",
+    layout="wide"
+)
 
-# --- CONFIGURAÇÃO DA API GEMINI ---
-GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
-
-# --- CONEXÃO COM O NEON POSTGRESQL ---
-DATABASE_URL = st.secrets.get("DATABASE_URL", os.environ.get("DATABASE_URL", ""))
-
-def get_connection():
-    if not DATABASE_URL:
-        st.error("⚠️ URL do banco de dados (DATABASE_URL) não encontrada nos Secrets do Streamlit!")
+# --- CONEXÃO COM O BANCO DE DADOS (POSTGRESQL / NEON) ---
+def get_db_connection():
+    try:
+        conn = psycopg2.connect(st.secrets["DATABASE_URL"])
+        return conn
+    except Exception as e:
+        st.error(f"Erro ao conectar ao banco de dados: {e}")
         st.stop()
-    return psycopg2.connect(DATABASE_URL)
 
 def init_db():
-    try:
-        conn = get_connection()
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS lancamentos (
-                id SERIAL PRIMARY KEY,
-                data VARCHAR(10),
-                descricao TEXT,
-                categoria TEXT,
-                tipo VARCHAR(10),
-                valor NUMERIC(12,2),
-                status VARCHAR(10)
-            );
-        ''')
-        conn.commit()
-        c.close()
-        conn.close()
-    except Exception as e:
-        st.error(f"Erro ao ligar ao Neon PostgreSQL: {str(e)}")
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS financas (
+            id SERIAL PRIMARY KEY,
+            data DATE NOT NULL,
+            descricao TEXT NOT NULL,
+            categoria TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            valor NUMERIC(10, 2) NOT NULL,
+            status TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
 
+init_db()
+
+# --- FUNÇÕES DE MANIPULAÇÃO DE DADOS ---
 def carregar_dados():
-    try:
-        conn = get_connection()
-        df = pd.read_sql_query("SELECT * FROM lancamentos ORDER BY data ASC, id ASC", conn)
-        conn.close()
-        if not df.empty:
-            df['valor'] = df['valor'].astype(float)
-        return df
-    except Exception:
-        return pd.DataFrame()
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM financas ORDER BY data DESC, id DESC", conn)
+    conn.close()
+    if not df.empty:
+        df['data'] = pd.to_datetime(df['data'])
+    return df
 
-def salvar_lancamentos(df_novos):
-    conn = get_connection()
-    c = conn.cursor()
-    for _, row in df_novos.iterrows():
-        c.execute('''
-            INSERT INTO lancamentos (data, descricao, categoria, tipo, valor, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (str(row['data']), str(row['descricao']), str(row['categoria']), str(row['tipo']), float(row['valor']), str(row['status'])))
+def salvar_lancamento(data, descricao, categoria, tipo, valor, status):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO financas (data, descricao, categoria, tipo, valor, status)
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (data, descricao, categoria, tipo, valor, status))
     conn.commit()
-    c.close()
+    cur.close()
     conn.close()
 
-def atualizar_status(id_registro, novo_status):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE lancamentos SET status = %s WHERE id = %s", (novo_status, int(id_registro)))
+def excluir_lancamento(id_registro):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM financas WHERE id = %s", (id_registro,))
     conn.commit()
-    c.close()
+    cur.close()
     conn.close()
 
-def excluir_registro(id_registro):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM lancamentos WHERE id = %s", (int(id_registro),))
-    conn.commit()
-    c.close()
-    conn.close()
-
-# --- FUNÇÃO DE FORMATAÇÃO EM REAIS (BRL) ---
 def formata_brl(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- ESTILIZAÇÃO CSS AVANÇADA ---
-st.markdown("""
-    <style>
-    .block-container {
-        padding-top: 1.8rem !important;
-        padding-bottom: 2rem !important;
-    }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-
-    /* KPI Cards - Estilo SaaS Clean */
-    .kpi-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 14px 16px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-        transition: all 0.2s ease-in-out;
-    }
-    .kpi-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-        border-color: #CBD5E1;
-    }
-    .kpi-title {
-        color: #64748B;
-        font-size: 0.75rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 4px;
-    }
-    .kpi-value {
-        font-size: 1.45rem;
-        font-weight: 700;
-        margin: 0;
-        line-height: 1.2;
-    }
-    .kpi-sub {
-        color: #64748B;
-        font-size: 0.72rem;
-        margin-top: 6px;
-        font-weight: 500;
-    }
-
-    /* Estilização das Abas (Tabs) */
-    button[data-baseweb="tab"] {
-        border-radius: 6px 6px 0 0 !important;
-        padding: 8px 16px !important;
-        font-weight: 600 !important;
-        font-size: 0.9rem !important;
-    }
-    button[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #F1F5F9 !important;
-        color: #1E293B !important;
-        border-bottom: 3px solid #2563EB !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- RELATÓRIO PDF (Compatível com fpdf2 e fpdf1) ---
+# --- CLASSE DE GERAÇÃO DE PDF ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -222,7 +143,7 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
     fill = False
     for _, row in df_periodo.iterrows():
         try:
-            data_str = datetime.strptime(str(row['data']), '%Y-%m-%d').strftime('%d/%m/%Y')
+            data_str = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
         except Exception:
             data_str = str(row['data'])
             
@@ -238,337 +159,210 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
         pdf.ln()
         fill = not fill
 
-    return bytes(pdf.output())
+    # Retorno compatível com FPDF1 e FPDF2 sem erro de tipo
+    saida = pdf.output()
+    if isinstance(saida, str):
+        return saida.encode('latin1')
+    elif isinstance(saida, (bytearray, bytes)):
+        return bytes(saida)
+    return bytes(saida)
 
-# Inicialização da base de dados no Neon
-init_db()
+# --- INTERFACE PRINCIPAL ---
+st.title("📊 Controle Financeiro Pessoal")
 
-meses_pt = {
-    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
-}
+df = carregar_dados()
 
-# --- SIDEBAR ---
-st.sidebar.title("⚙️ Painel de Controle")
-st.sidebar.markdown("---")
-
-df_todos = carregar_dados()
-
-if not df_todos.empty:
-    df_todos['datetime'] = pd.to_datetime(df_todos['data'])
-    df_todos['Ano'] = df_todos['datetime'].dt.year
-    df_todos['Mês_Num'] = df_todos['datetime'].dt.month
-    df_todos['Mês_Nome'] = df_todos['Mês_Num'].map(meses_pt)
-
-    st.sidebar.subheader("📌 Filtros do Relatório")
-    anos_disp = sorted(list(df_todos['Ano'].unique()), reverse=True)
-    ano_sel = st.sidebar.selectbox("Ano de Referência", anos_disp, key="side_ano")
+# BARRA LATERAL - NOVO LANÇAMENTO
+st.sidebar.header("➕ Novo Lançamento")
+with st.sidebar.form("form_lancamento", clear_on_submit=True):
+    data_input = st.date_input("Data", datetime.today())
+    desc_input = st.text_input("Descrição")
+    cat_input = st.selectbox("Categoria", [
+        "Alimentação", "Moradia", "Transporte", "Lazer", "Saúde", 
+        "Educação", "Salário", "Investimentos", "Outros"
+    ])
+    tipo_input = st.selectbox("Tipo", ["Entrada", "Saída"])
+    valor_input = st.number_input("Valor (R$)", min_value=0.01, step=10.0, format="%.2f")
+    status_input = st.selectbox("Status", ["Pago", "Pendente"])
     
-    opcao_periodo = st.sidebar.radio("Visão Visual", ["Mensal", "Ano Todo (Acumulado)"], key="side_visao")
-    
-    if opcao_periodo == "Mensal":
-        meses_disp = [meses_pt[m] for m in sorted(df_todos[df_todos['Ano'] == ano_sel]['Mês_Num'].unique())]
-        mes_sel_nome = st.sidebar.selectbox("Mês de Referência", meses_disp, key="side_mes")
-    else:
-        mes_sel_nome = "Todos"
+    submetido = st.form_submit_button("Salvar Lançamento")
+    if submetido:
+        if desc_input.strip() == "":
+            st.sidebar.error("Por favor, preencha a descrição.")
+        else:
+            salvar_lancamento(data_input, desc_input, cat_input, tipo_input, valor_input, status_input)
+            st.sidebar.success("Lançamento salvo com sucesso!")
+            st.rerun()
 
-    aberto_total = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
-    if aberto_total > 0:
-        st.sidebar.markdown("---")
-        st.sidebar.warning(f"⚠️ **Atenção:** Possui **{formata_brl(aberto_total)}** em contas pendentes!")
-
-# --- CORPO PRINCIPAL ---
-st.title("💼 Dashboard de Gestão Financeira")
-
-if not df_todos.empty:
-    total_entradas = df_todos[df_todos['tipo'] == 'Entrada']['valor'].sum()
-    total_saidas = df_todos[df_todos['tipo'] == 'Saída']['valor'].sum()
-    saldo_atual = total_entradas - total_saidas
-    em_aberto = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
-    pago_fechado = df_todos[df_todos['status'] == 'Pago']['valor'].sum()
-
-    cor_saldo_texto = "#15803D" if saldo_atual >= 0 else "#B91C1C"
-    cor_saldo_borda = "#16A34A" if saldo_atual >= 0 else "#DC2626"
-
-    c1, c2, c3, c4, c5 = st.columns(5)
-    
-    with c1:
-        st.markdown(f"""
-            <div class="kpi-card" style="border-left: 4px solid #16A34A;">
-                <div class="kpi-title">Total Entradas</div>
-                <div class="kpi-value" style="color: #15803D;">{formata_brl(total_entradas)}</div>
-                <div class="kpi-sub">📈 Receitas confirmadas</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    with c2:
-        st.markdown(f"""
-            <div class="kpi-card" style="border-left: 4px solid #DC2626;">
-                <div class="kpi-title">Total Saídas</div>
-                <div class="kpi-value" style="color: #B91C1C;">{formata_brl(total_saidas)}</div>
-                <div class="kpi-sub">📉 Despesas executadas</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    with c3:
-        st.markdown(f"""
-            <div class="kpi-card" style="border-left: 4px solid {cor_saldo_borda};">
-                <div class="kpi-title">Saldo Líquido</div>
-                <div class="kpi-value" style="color: {cor_saldo_texto};">{formata_brl(saldo_atual)}</div>
-                <div class="kpi-sub">⚖️ Balanço geral</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    with c4:
-        st.markdown(f"""
-            <div class="kpi-card" style="border-left: 4px solid #D97706;">
-                <div class="kpi-title">Contas em Aberto</div>
-                <div class="kpi-value" style="color: #B45309;">{formata_brl(em_aberto)}</div>
-                <div class="kpi-sub">⏳ Pendente de baixa</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    with c5:
-        st.markdown(f"""
-            <div class="kpi-card" style="border-left: 4px solid #2563EB;">
-                <div class="kpi-title">Contas Pagas</div>
-                <div class="kpi-value" style="color: #1D4ED8;">{formata_brl(pago_fechado)}</div>
-                <div class="kpi-sub">✅ Baixas efetuadas</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# --- NAVEGAÇÃO POR ABAS ---
+# ABAS DA APLICAÇÃO
 aba1, aba2, aba3, aba4, aba5 = st.tabs([
-    "➕ Novo Lançamento", 
-    "🔄 Parcelamento", 
-    "📋 Contas & Baixas",
-    "📊 Relatórios & Gráficos",
-    "🤖 Assistente IA (Texto/Voz)"
+    "📈 Visão Geral", 
+    "📝 Gerenciar Registros", 
+    "🤖 Assistente IA", 
+    "📄 Relatórios PDF", 
+    "⚙️ Configurações"
 ])
 
-# ABA 1: LANÇAMENTO ÚNICO
+# MESES EM PORTUGUÊS
+meses_nome = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril", 5: "Maio", 6: "Junho",
+    7: "Julho", 8: "Agosto", 9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
+}
+
+# ABA 1: VISÃO GERAL
 with aba1:
-    st.subheader("Registrar Lançamento Avulso")
-    col1, col2 = st.columns(2)
-    with col1:
-        data_u = st.date_input("Data de Vencimento", value=datetime.today(), key="data_u")
-        desc_u = st.text_input("Descrição", key="desc_u", placeholder="Ex: Conta de Luz")
-        cat_u = st.text_input("Categoria", key="cat_u", placeholder="Ex: Utilidades")
-    with col2:
-        tipo_u = st.selectbox("Tipo", ["Saída", "Entrada"], key="tipo_u")
-        valor_u = st.number_input("Valor (R$)", min_value=0.01, value=100.00, format="%.2f", key="val_u")
-        status_u = st.selectbox("Status Inicial", ["Aberto", "Pago"], key="st_u")
-
-    if st.button("💾 Salvar Lançamento", use_container_width=True):
-        if not desc_u:
-            st.warning("Preencha a descrição antes de salvar.")
-        else:
-            novo = pd.DataFrame([{
-                "data": data_u.strftime("%Y-%m-%d"),
-                "descricao": desc_u,
-                "categoria": cat_u,
-                "tipo": tipo_u,
-                "valor": float(valor_u),
-                "status": status_u
-            }])
-            salvar_lancamentos(novo)
-            st.success("Lançamento guardado com sucesso!")
-            st.rerun()
-
-# ABA 2: PARCELADO
-with aba2:
-    st.subheader("Registrar Parcelamento ou Recorrência")
-    col_l, col_r = st.columns(2)
-    with col_l:
-        data_p = st.date_input("Data da 1ª Parcela", value=datetime.today(), key="data_p")
-        desc_p = st.text_input("Descrição Base", key="desc_p", placeholder="Ex: Compra Equipamentos")
-        cat_p = st.text_input("Categoria", key="cat_p", placeholder="Ex: Investimentos")
-        tipo_p = st.selectbox("Tipo", ["Saída", "Entrada"], key="tipo_p")
-    with col_r:
-        regra_val = st.radio("Cálculo do Valor:", ["Valor Total (Dividir pelas parcelas)", "Valor Fixo por Parcela"], key="regra_v")
-        valor_dig = st.number_input("Valor (R$)", min_value=0.01, value=1200.00, format="%.2f", key="val_p")
-        qtd_p = st.number_input("Quantidade de Parcelas", min_value=1, value=12, step=1, key="qtd_p")
-        status_1a = st.selectbox("Status da 1ª Parcela", ["Aberto", "Pago"], key="st_p")
-
-    if st.button("🔄 Gerar Parcelamento", use_container_width=True):
-        if not desc_p:
-            st.warning("Preencha a descrição base.")
-        else:
-            val_calc = (valor_dig / qtd_p) if regra_val == "Valor Total (Dividir pelas parcelas)" else valor_dig
-            lista = []
-            for i in range(int(qtd_p)):
-                venc = data_p + relativedelta(months=i)
-                st_parc = status_1a if i == 0 else "Aberto"
-                lista.append({
-                    "data": venc.strftime("%Y-%m-%d"),
-                    "descricao": f"{desc_p} ({i+1}/{int(qtd_p)})",
-                    "categoria": cat_p,
-                    "tipo": tipo_p,
-                    "valor": round(val_calc, 2),
-                    "status": st_parc
-                })
-            salvar_lancamentos(pd.DataFrame(lista))
-            st.success(f"Registradas {int(qtd_p)} parcelas com sucesso!")
-            st.rerun()
-
-# ABA 3: EXTRATO E BAIXAS
-with aba3:
-    st.subheader("📋 Gestão de Extrato e Baixa Manual")
-    df_e = carregar_dados()
-    
-    if not df_e.empty:
-        df_e['datetime'] = pd.to_datetime(df_e['data'])
-        df_e['Ano'] = df_e['datetime'].dt.year
-        df_e['Mês_Nome'] = df_e['datetime'].dt.month.map(meses_pt)
-
-        f1, f2, f3 = st.columns([2, 2, 3])
-        with f1:
-            st_filtro = st.multiselect("Filtrar Status", df_e['status'].unique(), default=df_e['status'].unique())
-        with f2:
-            tp_filtro = st.multiselect("Filtrar Tipo", df_e['tipo'].unique(), default=df_e['tipo'].unique())
-        with f3:
-            busca = st.text_input("🔍 Pesquisar por Descrição ou Categoria", placeholder="Digite algo...")
-
-        df_f = df_e[(df_e['status'].isin(st_filtro)) & (df_e['tipo'].isin(tp_filtro))]
-        if busca:
-            df_f = df_f[df_f['descricao'].str.contains(busca, case=False) | df_f['categoria'].str.contains(busca, case=False)]
-
-        st.markdown("---")
-        if not df_f.empty:
-            opts = {f"ID {r['id']} | {r['data']} | {r['descricao']} - {formata_brl(r['valor'])} [{r['status']}]": r['id'] for _, r in df_f.iterrows()}
-            
-            c_sel, c_btn1, c_btn2 = st.columns([5, 2, 2])
-            with c_sel:
-                item_sel = st.selectbox("Selecione um lançamento para alterar:", list(opts.keys()))
-                id_target = opts[item_sel]
-            with c_btn1:
-                st.write("")
-                st.write("")
-                if st.button("✅ Dar Baixa (PAGO)", use_container_width=True):
-                    atualizar_status(id_target, "Pago")
-                    st.success("Atualizado para Pago!")
-                    st.rerun()
-            with c_btn2:
-                st.write("")
-                st.write("")
-                if st.button("🗑️ Excluir", use_container_width=True):
-                    excluir_registro(id_target)
-                    st.warning("Registro excluído!")
-                    st.rerun()
-
-            st.dataframe(
-                df_f[['id', 'data', 'descricao', 'categoria', 'tipo', 'valor', 'status']],
-                column_config={"valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f")},
-                hide_index=True,
-                use_container_width=True
-            )
-        else:
-            st.info("Nenhum lançamento encontrado com os filtros selecionados.")
+    st.subheader("Painel Geral")
+    if df.empty:
+        st.info("Nenhum lançamento cadastrado até o momento.")
     else:
-        st.info("Nenhum lançamento cadastrado.")
-
-# ABA 4: RELATÓRIOS & GRÁFICOS
-with aba4:
-    if not df_todos.empty:
-        df_p = df_todos[df_todos['Ano'] == ano_sel]
-        if opcao_periodo == "Mensal" and mes_sel_nome != "Todos":
-            df_p = df_p[df_p['Mês_Nome'] == mes_sel_nome]
-
-        ent_m = df_p[df_p['tipo'] == 'Entrada']['valor'].sum()
-        sai_m = df_p[df_p['tipo'] == 'Saída']['valor'].sum()
-        saldo_m = ent_m - sai_m
-        aberto_m = df_p[df_p['status'] == 'Aberto']['valor'].sum()
-
-        st.subheader(f"📊 Análise Visual: {mes_sel_nome if opcao_periodo == 'Mensal' else 'Ano ' + str(ano_sel)}")
+        df['ano'] = df['data'].dt.year
+        df['mes'] = df['data'].dt.month
         
-        col_g1, col_g2 = st.columns(2)
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            anos_disponiveis = sorted(df['ano'].unique(), reverse=True)
+            ano_sel = st.selectbox("Selecione o Ano", anos_disponiveis, key="vg_ano")
+        with col_f2:
+            df_ano = df[df['ano'] == ano_sel]
+            meses_disp = sorted(df_ano['mes'].unique())
+            meses_opcoes = [meses_nome[m] for m in meses_disp]
+            mes_sel_nome = st.selectbox("Selecione o Mês", meses_opcoes, key="vg_mes")
+            mes_sel = [k for k, v in meses_nome.items() if v == mes_sel_nome][0]
+            
+        df_filtrado = df[(df['ano'] == ano_sel) & (df['mes'] == mes_sel)]
         
-        with col_g1:
-            df_barras = df_p.groupby('tipo')['valor'].sum().reset_index()
-            if not df_barras.empty:
+        ent = df_filtrado[df_filtrado['tipo'] == 'Entrada']['valor'].sum()
+        sai = df_filtrado[df_filtrado['tipo'] == 'Saída']['valor'].sum()
+        saldo = ent - sai
+        pendente = df_filtrado[df_filtrado['status'] == 'Pendente']['valor'].sum()
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Entradas", formata_brl(ent))
+        m2.metric("Saídas", formata_brl(sai))
+        m3.metric("Saldo Líquido", formata_brl(saldo))
+        m4.metric("A Receber / Pagar", formata_brl(pendente))
+        
+        st.divider()
+        c_g1, c_g2 = st.columns(2)
+        with c_g1:
+            st.subheader("Despesas por Categoria")
+            df_saida = df_filtrado[df_filtrado['tipo'] == 'Saída']
+            if not df_saida.empty:
+                fig_cat = px.pie(df_saida, names='categoria', values='valor', hole=0.4)
+                st.plotly_chart(fig_cat, use_container_width=True)
+            else:
+                st.write("Sem saídas registradas neste período.")
+                
+        with c_g2:
+            st.subheader("Entradas vs Saídas")
+            if not df_filtrado.empty:
                 fig_bar = px.bar(
-                    df_barras, x='tipo', y='valor', color='tipo',
-                    color_discrete_map={'Entrada': '#16A34A', 'Saída': '#DC2626'},
-                    title="Entradas vs. Saídas (Período)",
-                    labels={'valor': 'Total (R$)', 'tipo': 'Tipo'}
+                    df_filtrado.groupby('tipo')['valor'].sum().reset_index(),
+                    x='tipo', y='valor', color='tipo',
+                    color_discrete_map={'Entrada': '#2ECC71', 'Saída': '#E74C3C'}
                 )
-                fig_bar.update_layout(showlegend=False, margin=dict(l=20, r=20, t=40, b=20), height=320)
                 st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                st.info("Sem dados para o gráfico comparativo.")
 
-        with col_g2:
-            df_cat = df_p[df_p['tipo'] == 'Saída'].groupby('categoria')['valor'].sum().reset_index()
-            if not df_cat.empty:
-                fig_pie = px.pie(
-                    df_cat, values='valor', names='categoria', hole=0.4,
-                    title="Distribuição de Saídas por Categoria"
-                )
-                fig_pie.update_layout(margin=dict(l=20, r=20, t=40, b=20), height=320)
-                st.plotly_chart(fig_pie, use_container_width=True)
-            else:
-                st.info("Nenhuma saída registrada no período.")
+# ABA 2: GERENCIAR REGISTROS
+with aba2:
+    st.subheader("Lançamentos Registrados")
+    if df.empty:
+        st.info("Nenhum dado encontrado.")
+    else:
+        df_exibir = df[['id', 'data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
+        df_exibir['data'] = df_exibir['data'].dt.strftime('%d/%m/%Y')
+        df_exibir['valor'] = df_exibir['valor'].apply(formata_brl)
+        
+        st.dataframe(df_exibir, use_container_width=True)
+        
+        st.divider()
+        st.subheader("🗑️ Excluir Lançamento")
+        id_excluir = st.number_input("Digite o ID do lançamento que deseja remover:", min_value=1, step=1)
+        if st.button("Confirmar Exclusão"):
+            excluir_lancamento(id_excluir)
+            st.success(f"Registro #{id_excluir} excluído com sucesso!")
+            st.rerun()
 
-        st.markdown("---")
+# ABA 3: ASSISTENTE IA
+with aba3:
+    st.subheader("🤖 Consultar IA sobre Finanças")
+    if "GEMINI_API_KEY" in st.secrets:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        
+        prompt_user = st.text_area("Faça uma pergunta sobre a sua situação financeira atual:")
+        if st.button("Analisar com Inteligência Artificial"):
+            if prompt_user.strip() != "":
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                contexto_dados = df.to_csv(index=False)
+                prompt_completo = f"""
+                Você é um consultor financeiro pessoal especialista.
+                Analise os dados financeiros abaixo do usuário em formato CSV e responda à pergunta.
+                
+                Dados Financeiros:
+                {contexto_dados}
+                
+                Pergunta do Usuário: {prompt_user}
+                """
+                with st.spinner("Analisando seus dados..."):
+                    resposta = model.generate_content(prompt_completo)
+                    st.markdown("### Resposta do Consultor:")
+                    st.write(resposta.text)
+            else:
+                st.warning("Escreva uma pergunta primeiro.")
+    else:
+        st.warning("Adicione a chave GEMINI_API_KEY nos Secrets do Streamlit para usar esta função.")
+
+# ABA 4: RELATÓRIOS PDF
+with aba4:
+    st.subheader("📋 Gerar e Baixar Relatório PDF")
+    if df.empty:
+        st.info("Não existem registros para gerar relatórios.")
+    else:
+        df['ano'] = df['data'].dt.year
+        df['mes'] = df['data'].dt.month
+        
+        c_r1, c_r2, c_r3 = st.columns(3)
+        with c_r1:
+            opcao_periodo = st.radio("Filtro do Relatório", ["Mensal", "Anual"])
+        with c_r2:
+            ano_pdf = st.selectbox("Ano", sorted(df['ano'].unique(), reverse=True), key="pdf_ano")
+        with c_r3:
+            if opcao_periodo == "Mensal":
+                df_ano_pdf = df[df['ano'] == ano_pdf]
+                meses_p = sorted(df_ano_pdf['mes'].unique())
+                mes_pdf_nome = st.selectbox("Mês", [meses_nome[m] for m in meses_p], key="pdf_mes")
+                mes_pdf = [k for k, v in meses_nome.items() if v == mes_pdf_nome][0]
+
+        if opcao_periodo == "Mensal":
+            df_pdf = df[(df['ano'] == ano_pdf) & (df['mes'] == mes_pdf)]
+            tit_doc = f"{mes_pdf_nome} de {ano_pdf}"
+        else:
+            df_pdf = df[df['ano'] == ano_pdf]
+            tit_doc = f"Ano Completo {ano_pdf}"
+            
+        ent_m = df_pdf[df_pdf['tipo'] == 'Entrada']['valor'].sum()
+        sai_m = df_pdf[df_pdf['tipo'] == 'Saída']['valor'].sum()
+        saldo_m = ent_m - sai_m
+        aberto_m = df_pdf[df_pdf['status'] == 'Pendente']['valor'].sum()
+
         st.subheader("📋 Detalhamento em Tabela")
-        
-        df_exp = df_p[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
-        st.dataframe(df_exp, use_container_width=True, hide_index=True)
+        st.dataframe(df_pdf[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']], use_container_width=True)
 
-        tit_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
+        st.divider()
         
-        # Gerar o PDF diretamente no botão de Download para evitar ficheiros de 0 bytes
-        pdf_data = gerar_pdf_isolado(df_exp, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
+        # GERAÇÃO DIRETA DENTRO DO BOTÃO DE DOWNLOAD
+        pdf_bytes = gerar_pdf_isolado(df_pdf, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
         
         st.download_button(
-            label="📥 Baixar Relatório PDF Profissional",
-            data=pdf_data,
-            file_name=f"relatorio_{ano_sel}_{mes_sel_nome}.pdf",
+            label="📥 Baixar Relatório PDF Formatado",
+            data=pdf_bytes,
+            file_name=f"relatorio_financeiro_{ano_pdf}_{tit_doc.replace(' ', '_')}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
-    else:
-        st.info("Nenhum dado cadastrado para gerar relatórios.")
 
-# ABA 5: ASSISTENTE IA (TEXTO E VOZ)
+# ABA 5: CONFIGURAÇÕES
 with aba5:
-    st.subheader("🤖 Copiloto Financeiro Inteligente")
-    st.markdown("Faça perguntas sobre o seu saldo, dívidas em aberto ou relatórios do sistema.")
-
-    col_mic, col_txt = st.columns([1, 4])
-    pergunta_final = ""
-
-    with col_mic:
-        st.write("🎙️ **Gravar Voz:**")
-        audio_bytes = audio_recorder(text="", recording_color="#e84c3d", neutral_color="#303030", icon_size="2x")
-        
-        if audio_bytes:
-            st.audio(audio_bytes, format="audio/wav")
-            st.info("💡 Gravado! Digite ou envie a confirmação para consultar.")
-
-    with col_txt:
-        pergunta_texto = st.text_input("💬 **Digite sua pergunta:**", placeholder="Ex: Qual é o meu saldo atual e quais contas tenho a pagar?")
-        if pergunta_texto:
-            pergunta_final = pergunta_texto
-
-    if pergunta_final:
-        with st.spinner("A consultar dados e gerar resposta com o Gemini..."):
-            resposta = consultar_ia_gemini(pergunta_final)
-            
-            st.markdown("### 🤖 Resposta:")
-            st.success(resposta)
-            
-            # Síntese de Voz (gTTS)
-            try:
-                tts = gTTS(text=resposta, lang='pt', tld='com.br')
-                fp = io.BytesIO()
-                tts.write_to_fp(fp)
-                fp.seek(0)
-                
-                st.write("🔊 **Ouvir resposta em áudio:**")
-                st.audio(fp, format='audio/mp3')
-            except Exception:
-                st.caption("Não foi possível gerar áudio no momento.")
+    st.subheader("⚙️ Status e Diagnóstico")
+    st.success("Conexão com PostgreSQL (Neon) Ativa e Operacional.")
+    st.write(f"Total de registros na base de dados: **{len(df)}**")
