@@ -264,7 +264,7 @@ def consultar_ia_gemini(pergunta_usuario):
     Pergunta do usuário: {pergunta_usuario}
     """
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
@@ -306,7 +306,7 @@ if not df_todos.empty:
     aberto_total = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
     if aberto_total > 0:
         st.sidebar.markdown("---")
-        st.sidebar.warning(f"⚠️ **Atenção:** Você possui **{formata_brl(aberto_total)}** em contas pendentes!")
+        st.sidebar.warning(f"⚠️️ **Atenção:** Você possui **{formata_brl(aberto_total)}** em contas pendentes!")
 
 # --- CORPO PRINCIPAL ---
 st.title("💼 Dashboard de Gestão Financeira")
@@ -550,7 +550,7 @@ with aba4:
 
         tit_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
         
-        if st.button("⚙️️ Gerar Relatório PDF Profissional", use_container_width=True):
+        if st.button("⚙ Gerar Relatório PDF Profissional", use_container_width=True):
             pdf_bytes = gerar_pdf_isolado(df_exp, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
             st.session_state['pdf_pronto'] = pdf_bytes
             st.session_state['pdf_nome'] = f"relatorio_{ano_sel}_{mes_sel_nome}.pdf"
