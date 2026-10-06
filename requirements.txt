@@ -5,8 +5,8 @@ google-auth
 plotly
 openpyxl
 weasyprint
-python-dateutil
-fpdf2
-streamlit
 fpdf2
 python-dateutil
+google-generativeai
+audio-recorder-streamlit
+gTTS

@@ -5,24 +5,31 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 import plotly.express as px
+import google.generativeai as genai
+from audio_recorder_streamlit import audio_recorder
+from gtts import gTTS
+import io
+import os
 
-# Configuração da página
-st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="📊")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Controle Financeiro Integrado", layout="wide", page_icon="📊")
+
+# --- CONFIGURAÇÃO DA API GEMINI ---
+GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
 
 # --- FUNÇÃO DE FORMATAÇÃO EM REAIS (BRL) ---
 def formata_brl(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- ESTILIZAÇÃO CSS AVANÇADA E CLEAN ---
+# --- ESTILIZAÇÃO CSS AVANÇADA ---
 st.markdown("""
     <style>
-    /* Otimização de margens superiores da página */
     .block-container {
         padding-top: 1.8rem !important;
         padding-bottom: 2rem !important;
     }
-    
-    /* Esconde marca d'água, menu nativo e rodapé do Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -77,7 +84,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CONEXÃO E BANCO DE DADOS ---
+# --- BANCO DE DADOS ---
 def get_connection():
     return sqlite3.connect("financeiro.db")
 
@@ -124,7 +131,7 @@ def excluir_registro(id_registro):
     conn.commit()
     conn.close()
 
-# --- CLASSE PARA RELATÓRIO PDF ---
+# --- RELATÓRIO PDF ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -211,6 +218,58 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
 
     return bytes(pdf.output())
 
+# --- FUNÇÃO INTEGRAÇÃO IA (GEMINI) ---
+def obter_contexto_financeiro():
+    df = carregar_dados()
+    if df.empty:
+        return "O banco de dados financeiro está atualmente sem lançamentos registrados."
+    
+    total_ent = df[df['tipo'] == 'Entrada']['valor'].sum()
+    total_sai = df[df['tipo'] == 'Saída']['valor'].sum()
+    saldo = total_ent - total_sai
+    em_aberto = df[df['status'] == 'Aberto']['valor'].sum()
+    pagos = df[df['status'] == 'Pago']['valor'].sum()
+    
+    pendentes_df = df[df['status'] == 'Aberto'][['data', 'descricao', 'categoria', 'tipo', 'valor']].to_string(index=False)
+    ultimos_df = df.tail(10)[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].to_string(index=False)
+    
+    contexto = f"""
+    DADOS ATUAIS DO SISTEMA FINANCEIRO:
+    - Total Entradas Confirmadas: R$ {total_ent:,.2f}
+    - Total Saídas Registradas: R$ {total_sai:,.2f}
+    - Saldo Líquido Atual: R$ {saldo:,.2f}
+    - Valor Total em Aberto (A Pagar/Receber): R$ {em_aberto:,.2f}
+    - Valor Total Pago/Baixado: R$ {pagos:,.2f}
+    
+    LISTA DE CONTAS EM ABERTO:
+    {pendentes_df}
+    
+    ÚLTIMOS 10 LANÇAMENTOS REGISTRADOS:
+    {ultimos_df}
+    """
+    return contexto
+
+def consultar_ia_gemini(pergunta_usuario):
+    if not GEMINI_KEY:
+        return "⚠️ Chave de API do Gemini não configurada. Adicione 'GEMINI_API_KEY' nos secrets do Streamlit."
+    
+    contexto = obter_contexto_financeiro()
+    prompt = f"""
+    Você é um assistente financeiro pessoal inteligente e especialista em gestão.
+    Responda à pergunta do usuário com base estritamente nos dados do sistema abaixo.
+    Seja conciso, direto e formate todos os valores monetários no padrão brasileiro (R$ X.XXX,XX).
+
+    {contexto}
+
+    Pergunta do usuário: {pergunta_usuario}
+    """
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Erro ao consultar o Gemini: {str(e)}"
+
 # Inicialização
 init_db()
 
@@ -220,7 +279,7 @@ meses_pt = {
     9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
 }
 
-# --- BARRA LATERAL (SIDEBAR) ---
+# --- SIDEBAR ---
 st.sidebar.title("⚙️ Painel de Controle")
 st.sidebar.markdown("---")
 
@@ -244,7 +303,6 @@ if not df_todos.empty:
     else:
         mes_sel_nome = "Todos"
 
-    # Alerta Inteligente
     aberto_total = df_todos[df_todos['status'] == 'Aberto']['valor'].sum()
     if aberto_total > 0:
         st.sidebar.markdown("---")
@@ -263,7 +321,6 @@ if not df_todos.empty:
     cor_saldo_texto = "#15803D" if saldo_atual >= 0 else "#B91C1C"
     cor_saldo_borda = "#16A34A" if saldo_atual >= 0 else "#DC2626"
 
-    # 5 KPI Cards Superiores
     c1, c2, c3, c4, c5 = st.columns(5)
     
     with c1:
@@ -314,11 +371,12 @@ if not df_todos.empty:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # --- NAVEGAÇÃO POR ABAS ---
-aba1, aba2, aba3, aba4 = st.tabs([
+aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "➕ Novo Lançamento", 
-    "🔄 Parcelamento / Recorrente", 
+    "🔄 Parcelamento", 
     "📋 Contas & Baixas",
-    "📊 Relatórios & Gráficos"
+    "📊 Relatórios & Gráficos",
+    "🤖 Assistente IA (Texto/Voz)"
 ])
 
 # ABA 1: LANÇAMENTO ÚNICO
@@ -456,7 +514,6 @@ with aba4:
 
         st.subheader(f"📊 Análise Visual: {mes_sel_nome if opcao_periodo == 'Mensal' else 'Ano ' + str(ano_sel)}")
         
-        # Gráficos com Plotly (Visual Moderno)
         col_g1, col_g2 = st.columns(2)
         
         with col_g1:
@@ -493,7 +550,7 @@ with aba4:
 
         tit_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
         
-        if st.button("⚙️ Gerar Relatório PDF Profissional", use_container_width=True):
+        if st.button("⚙️️ Gerar Relatório PDF Profissional", use_container_width=True):
             pdf_bytes = gerar_pdf_isolado(df_exp, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
             st.session_state['pdf_pronto'] = pdf_bytes
             st.session_state['pdf_nome'] = f"relatorio_{ano_sel}_{mes_sel_nome}.pdf"
@@ -509,3 +566,43 @@ with aba4:
             )
     else:
         st.info("Nenhum dado cadastrado para gerar relatórios.")
+
+# ABA 5: ASSISTENTE IA (TEXTO E VOZ)
+with aba5:
+    st.subheader("🤖 Copiloto Financeiro Inteligente")
+    st.markdown("Faça perguntas sobre o seu saldo, dívidas em aberto ou relatórios do sistema.")
+
+    col_mic, col_txt = st.columns([1, 4])
+    pergunta_final = ""
+
+    with col_mic:
+        st.write("🎙️ **Gravar Voz:**")
+        audio_bytes = audio_recorder(text="", recording_color="#e84c3d", neutral_color="#303030", icon_size="2x")
+        
+        if audio_bytes:
+            st.audio(audio_bytes, format="audio/wav")
+            st.info("💡 Gravado! Digite ou envie a confirmação para consultar.")
+
+    with col_txt:
+        pergunta_texto = st.text_input("💬 **Digite sua pergunta:**", placeholder="Ex: Qual é o meu saldo atual e quais contas tenho a pagar?")
+        if pergunta_texto:
+            pergunta_final = pergunta_texto
+
+    if pergunta_final:
+        with st.spinner("A consultar dados e gerar resposta com o Gemini..."):
+            resposta = consultar_ia_gemini(pergunta_final)
+            
+            st.markdown("### 🤖 Resposta:")
+            st.success(resposta)
+            
+            # Síntese de Voz (gTTS)
+            try:
+                tts = gTTS(text=resposta, lang='pt', tld='com.br')
+                fp = io.BytesIO()
+                tts.write_to_fp(fp)
+                fp.seek(0)
+                
+                st.write("🔊 **Ouvir resposta em áudio:**")
+                st.audio(fp, format='audio/mp3')
+            except Exception as e:
+                st.caption("Não foi possível gerar áudio no momento.")
