@@ -238,11 +238,7 @@ def gerar_pdf_isolado(df_periodo, titulo_periodo, total_ent, total_sai, saldo, a
         pdf.ln()
         fill = not fill
 
-    # Tratamento seguro para FPDF1 e FPDF2
-    out = pdf.output()
-    if isinstance(out, str):
-        return out.encode('latin1')
-    return bytes(out)
+    return bytes(pdf.output())
 
 # Inicialização da base de dados no Neon
 init_db()
@@ -524,20 +520,16 @@ with aba4:
 
         tit_doc = f"{mes_sel_nome} de {ano_sel}" if opcao_periodo == "Mensal" else f"Ano Completo {ano_sel}"
         
-        if st.button("⚙ Gerar Relatório PDF Profissional", use_container_width=True):
-            pdf_bytes = gerar_pdf_isolado(df_exp, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
-            st.session_state['pdf_pronto'] = pdf_bytes
-            st.session_state['pdf_nome'] = f"relatorio_{ano_sel}_{mes_sel_nome}.pdf"
-            st.rerun()
-
-        if 'pdf_pronto' in st.session_state:
-            st.download_button(
-                label="📥 Baixar PDF Formatado",
-                data=st.session_state['pdf_pronto'],
-                file_name=st.session_state['pdf_nome'],
-                mime="application/pdf",
-                use_container_width=True
-            )
+        # Gerar o PDF diretamente no botão de Download para evitar ficheiros de 0 bytes
+        pdf_data = gerar_pdf_isolado(df_exp, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
+        
+        st.download_button(
+            label="📥 Baixar Relatório PDF Profissional",
+            data=pdf_data,
+            file_name=f"relatorio_{ano_sel}_{mes_sel_nome}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
     else:
         st.info("Nenhum dado cadastrado para gerar relatórios.")
 
