@@ -81,7 +81,7 @@ def excluir_lancamento(id_registro):
 def formata_brl(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- CLASSE DE GERAÇÃO DE PDF (COMPATÍVEL COM FPDF2) ---
+# --- CLASSE DE GERAÇÃO DE PDF (COMPATÍVEL COM FPDF1 E FPDF2) ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -92,9 +92,9 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', ln=1)
         self.set_font('Helvetica', 'I', 9)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x='LMARGIN', new_y='NEXT')
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', ln=1)
         self.ln(8)
 
     def footer(self):
@@ -111,7 +111,7 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     # Resumo
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'RESUMO DO PERÍODO', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 7, 'RESUMO DO PERÍODO', ln=1)
     
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(0, 0, 0)
@@ -131,7 +131,7 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     # Tabela
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', new_x='LMARGIN', new_y='NEXT')
+    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
     pdf.ln(1)
 
     pdf.set_font('Helvetica', 'B', 8)
@@ -168,8 +168,10 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
         pdf.ln()
         fill = not fill
 
-    # Retorna o buffer binário diretamente do FPDF2
-    return bytes(pdf.output())
+    output = pdf.output(dest='S')
+    if isinstance(output, str):
+        return output.encode('latin1')
+    return bytes(output)
 
 # --- INTERFACE PRINCIPAL ---
 st.title("📊 Controle Financeiro Pessoal")
@@ -354,7 +356,6 @@ with aba4:
 
         st.divider()
         
-        # GERAR BYTES DIRETAMENTE
         pdf_file_data = gerar_pdf_bytes(df_pdf, tit_doc, ent_m, sai_m, saldo_m, aberto_m)
         
         st.download_button(
