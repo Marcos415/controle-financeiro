@@ -108,27 +108,7 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     pdf.alias_nb_pages()
     pdf.add_page()
     
-    # Resumo
-    pdf.set_font('Helvetica', 'B', 10)
-    pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'RESUMO DO PERÍODO', ln=1)
-    
-    pdf.set_font('Helvetica', '', 9)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_fill_color(245, 247, 250)
-    pdf.set_draw_color(210, 215, 220)
-    pdf.rect(10, pdf.get_y(), 190, 18, 'FD')
-    
-    y_start = pdf.get_y() + 3
-    pdf.set_y(y_start)
-    pdf.cell(47.5, 5, f'Entradas: {formata_brl(total_ent)}', align='C')
-    pdf.cell(47.5, 5, f'Saídas: {formata_brl(total_sai)}', align='C')
-    pdf.cell(47.5, 5, f'Saldo Líquido: {formata_brl(saldo)}', align='C')
-    pdf.cell(47.5, 5, f'Em Aberto: {formata_brl(aberto)}', align='C')
-    
-    pdf.set_y(y_start + 18)
-
-    # Tabela
+    # Tabela com o Detalhamento dos Lançamentos
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
     pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
@@ -172,7 +152,6 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     if isinstance(output, str):
         return output.encode('latin1')
     return bytes(output)
-
 # --- INTERFACE PRINCIPAL ---
 st.title("📊 Controle Financeiro Pessoal")
 
