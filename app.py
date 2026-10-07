@@ -124,7 +124,7 @@ def formata_brl(valor):
     except Exception:
         return "R$ 0,00"
 
-# --- CLASSE E GERAÇÃO DO PDF (ISOLADA DE QUALQUER ST.WRITE) ---
+# --- CLASSE E GERAÇÃO DO PDF (ISOLADA DE MAGIC COMMANDS) ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -135,26 +135,28 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 6, 'RELATORIO DE CONTROLE FINANCEIRO', align='C', ln=True)
+        _ = self.cell(0, 6, 'RELATORIO DE CONTROLE FINANCEIRO', align='C', ln=True)
         self.set_font('Helvetica', 'I', 9)
-        self.cell(0, 5, f'Periodo: {self.titulo_periodo}', align='C', ln=True)
-        self.ln(8)
+        _ = self.cell(0, 5, f'Periodo: {self.titulo_periodo}', align='C', ln=True)
+        _ = self.ln(8)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y")} | Pagina {self.page_no()}', align='C')
+        _ = self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y")} | Pagina {self.page_no()}', align='C')
 
-def criar_pdf_relatorio(df_periodo, titulo_periodo):
+@st.cache_data(show_spinner=False)
+def gerar_bytes_pdf(df_json, titulo_periodo):
+    df_periodo = pd.read_json(df_json)
     pdf = RelatorioPDF(titulo_periodo)
     pdf.alias_nb_pages()
     pdf.add_page()
     
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'DETALHAMENTO DOS LANCAMENTOS', ln=True)
-    pdf.ln(1)
+    _ = pdf.cell(0, 7, 'DETALHAMENTO DOS LANCAMENTOS', ln=True)
+    _ = pdf.ln(1)
 
     pdf.set_font('Helvetica', 'B', 8)
     pdf.set_fill_color(31, 78, 121)
@@ -163,19 +165,17 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
     larguras = [22, 68, 35, 18, 27, 20]
     colunas = ['Data', 'Descricao', 'Categoria', 'Tipo', 'Valor', 'Status']
     
-    # Renderiza cabeçalhos da tabela
     for i in range(len(colunas)):
         col = colunas[i]
         w = larguras[i]
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
-        pdf.cell(w, 7, col, fill=True, border=1, align=align)
-    pdf.ln()
+        _ = pdf.cell(w, 7, col, fill=True, border=1, align=align)
+    _ = pdf.ln()
 
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(0, 0, 0)
     
     fill = False
-    # Renderiza linhas da tabela sem criar listas de retorno
     for _, row in df_periodo.iterrows():
         try:
             data_str = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
@@ -190,16 +190,15 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
         tp = str(row['tipo']) if pd.notna(row['tipo']) else ""
         st_val = str(row['status']) if pd.notna(row['status']) else ""
 
-        pdf.cell(larguras[0], 6.5, data_str, border=1, align='C', fill=fill)
-        pdf.cell(larguras[1], 6.5, desc[:35], border=1, align='L', fill=fill)
-        pdf.cell(larguras[2], 6.5, cat[:18], border=1, align='L', fill=fill)
-        pdf.cell(larguras[3], 6.5, tp, border=1, align='C', fill=fill)
-        pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
-        pdf.cell(larguras[5], 6.5, st_val, border=1, align='C', fill=fill)
-        pdf.ln()
+        _ = pdf.cell(larguras[0], 6.5, data_str, border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[1], 6.5, desc[:35], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[2], 6.5, cat[:18], border=1, align='L', fill=fill)
+        _ = pdf.cell(larguras[3], 6.5, tp, border=1, align='C', fill=fill)
+        _ = pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
+        _ = pdf.cell(larguras[5], 6.5, st_val, border=1, align='C', fill=fill)
+        _ = pdf.ln()
         fill = not fill
 
-    # Retorna o buffer binário do PDF
     out = pdf.output(dest='S')
     if isinstance(out, str):
         return out.encode('latin1', errors='ignore')
@@ -306,7 +305,6 @@ with aba2:
     if df.empty:
         st.info("Nenhum dado encontrado.")
     else:
-        # CONSTRUÇÃO DIRETA DO DATAFRAME SEM LAÇOS SOLTOS
         df_exibir = pd.DataFrame({
             'ID': df['id'],
             'Data': df['data'].dt.strftime('%d/%m/%Y'),
@@ -361,68 +359,4 @@ with aba3:
     else:
         st.warning("Chave GEMINI_API_KEY não configurada nos secrets.")
 
-# ABA 4: RELATÓRIOS PDF
-# ABA 4: RELATÓRIOS PDF
-with aba4:
-    st.subheader("📋 Gerar e Baixar Relatório PDF")
-    if df.empty:
-        st.info("Sem dados para relatório.")
-    else:
-        df['ano'] = df['data'].dt.year
-        df['mes'] = df['data'].dt.month
-        
-        cr1, cr2, cr3 = st.columns(3)
-        with cr1:
-            opcao_periodo = st.radio("Filtro", ["Mensal", "Anual"])
-        with cr2:
-            anos_p = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
-            ano_pdf = st.selectbox("Ano", anos_p, key="pdf_ano")
-        with cr3:
-            if opcao_periodo == "Mensal":
-                df_ano_p = df[df['ano'] == ano_pdf]
-                meses_p = sorted(df_ano_p['mes'].dropna().unique().astype(int))
-                meses_opc = [meses_nome[m] for m in meses_p if m in meses_nome]
-                if meses_opc:
-                    mes_pdf_nome = st.selectbox("Mês", meses_opc, key="pdf_mes")
-                    mes_pdf = [k for k, v in meses_nome.items() if v == mes_pdf_nome][0]
-                else:
-                    mes_pdf_nome = "Janeiro"
-                    mes_pdf = 1
-
-        if opcao_periodo == "Mensal":
-            df_pdf = df[(df['ano'] == ano_pdf) & (df['mes'] == mes_pdf)].copy()
-            tit_doc = f"{mes_pdf_nome} de {ano_pdf}"
-        else:
-            df_pdf = df[df['ano'] == ano_pdf].copy()
-            tit_doc = f"Ano Completo {ano_pdf}"
-
-        st.subheader("📋 Tabela do Relatório")
-        
-        df_tabela_pdf = pd.DataFrame({
-            'Data': df_pdf['data'].dt.strftime('%d/%m/%Y'),
-            'Descrição': df_pdf['descricao'],
-            'Categoria': df_pdf['categoria'],
-            'Tipo': df_pdf['tipo'],
-            'Valor': df_pdf['valor'].apply(formata_brl),
-            'Status': df_pdf['status']
-        })
-        
-        st.dataframe(df_tabela_pdf, use_container_width=True, hide_index=True)
-        st.divider()
-
-        # Prepara o arquivo diretamente sem usar 'if st.button()'
-        pdf_bytes = criar_pdf_relatorio(df_pdf, tit_doc)
-        
-        st.download_button(
-            label="📥 Baixar Relatório PDF",
-            data=pdf_bytes,
-            file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-# ABA 5: CONFIGURAÇÕES
-with aba5:
-    st.subheader("⚙️ Status do Sistema")
-    st.success("Conexão ativa com o banco PostgreSQL.")
-    st.write(f"Total de registros armazenados: **{len(df)}**")
+# ABA
