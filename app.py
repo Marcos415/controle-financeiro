@@ -359,4 +359,67 @@ with aba3:
     else:
         st.warning("Chave GEMINI_API_KEY não configurada nos secrets.")
 
-# ABA
+# ABA 4: RELATÓRIOS PDF
+with aba4:
+    st.subheader("📋 Gerar e Baixar Relatório PDF")
+    if df.empty:
+        st.info("Sem dados para relatório.")
+    else:
+        df['ano'] = df['data'].dt.year
+        df['mes'] = df['data'].dt.month
+        
+        cr1, cr2, cr3 = st.columns(3)
+        with cr1:
+            opcao_periodo = st.radio("Filtro", ["Mensal", "Anual"])
+        with cr2:
+            anos_p = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
+            ano_pdf = st.selectbox("Ano", anos_p, key="pdf_ano")
+        with cr3:
+            if opcao_periodo == "Mensal":
+                df_ano_p = df[df['ano'] == ano_pdf]
+                meses_p = sorted(df_ano_p['mes'].dropna().unique().astype(int))
+                meses_opc = [meses_nome[m] for m in meses_p if m in meses_nome]
+                if meses_opc:
+                    mes_pdf_nome = st.selectbox("Mês", meses_opc, key="pdf_mes")
+                    mes_pdf = [k for k, v in meses_nome.items() if v == mes_pdf_nome][0]
+                else:
+                    mes_pdf_nome = "Janeiro"
+                    mes_pdf = 1
+
+        if opcao_periodo == "Mensal":
+            df_pdf = df[(df['ano'] == ano_pdf) & (df['mes'] == mes_pdf)].copy()
+            tit_doc = f"{mes_pdf_nome} de {ano_pdf}"
+        else:
+            df_pdf = df[df['ano'] == ano_pdf].copy()
+            tit_doc = f"Ano Completo {ano_pdf}"
+
+        st.subheader("📋 Tabela do Relatório")
+        
+        df_tabela_pdf = pd.DataFrame({
+            'Data': df_pdf['data'].dt.strftime('%d/%m/%Y'),
+            'Descrição': df_pdf['descricao'],
+            'Categoria': df_pdf['categoria'],
+            'Tipo': df_pdf['tipo'],
+            'Valor': df_pdf['valor'].apply(formata_brl),
+            'Status': df_pdf['status']
+        })
+        
+        st.dataframe(df_tabela_pdf, use_container_width=True, hide_index=True)
+        st.divider()
+
+        df_json = df_pdf.to_json()
+        pdf_bytes = gerar_bytes_pdf(df_json, tit_doc)
+        
+        st.download_button(
+            label="📥 Baixar Relatório PDF",
+            data=pdf_bytes,
+            file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+# ABA 5: CONFIGURAÇÕES
+with aba5:
+    st.subheader("⚙️ Status do Sistema")
+    st.success("Conexão ativa com o banco PostgreSQL.")
+    st.write(f"Total de registros armazenados: **{len(df)}**")
