@@ -163,17 +163,19 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
     larguras = [22, 68, 35, 18, 27, 20]
     colunas = ['Data', 'Descricao', 'Categoria', 'Tipo', 'Valor', 'Status']
     
-    # LAÇO TRADICIONAL (SEM COMPREHENSION)
-    for idx, col in enumerate(colunas):
+    # Renderiza cabeçalhos da tabela
+    for i in range(len(colunas)):
+        col = colunas[i]
+        w = larguras[i]
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
-        pdf.cell(larguras[idx], 7, col, fill=True, border=1, align=align)
+        pdf.cell(w, 7, col, fill=True, border=1, align=align)
     pdf.ln()
 
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(0, 0, 0)
     
     fill = False
-    # LAÇO TRADICIONAL
+    # Renderiza linhas da tabela sem criar listas de retorno
     for _, row in df_periodo.iterrows():
         try:
             data_str = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
@@ -197,10 +199,11 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
         pdf.ln()
         fill = not fill
 
-    output = pdf.output(dest='S')
-    if isinstance(output, str):
-        return output.encode('latin1', errors='ignore')
-    return bytes(output)
+    # Retorna o buffer binário do PDF
+    out = pdf.output(dest='S')
+    if isinstance(out, str):
+        return out.encode('latin1', errors='ignore')
+    return bytes(out)
 
 # --- APLICAÇÃO PRINCIPAL ---
 st.title("📊 Controle Financeiro Pessoal")
@@ -359,6 +362,7 @@ with aba3:
         st.warning("Chave GEMINI_API_KEY não configurada nos secrets.")
 
 # ABA 4: RELATÓRIOS PDF
+# ABA 4: RELATÓRIOS PDF
 with aba4:
     st.subheader("📋 Gerar e Baixar Relatório PDF")
     if df.empty:
@@ -394,7 +398,6 @@ with aba4:
 
         st.subheader("📋 Tabela do Relatório")
         
-        # TABELA TOTALMENTE VETORIZADA SEM ITERAÇÃO DIRETA
         df_tabela_pdf = pd.DataFrame({
             'Data': df_pdf['data'].dt.strftime('%d/%m/%Y'),
             'Descrição': df_pdf['descricao'],
@@ -407,16 +410,16 @@ with aba4:
         st.dataframe(df_tabela_pdf, use_container_width=True, hide_index=True)
         st.divider()
 
-        # BOTÃO COM GERAÇÃO SOB DEMANDA
-        if st.button("🔄 Gerar Arquivo PDF", use_container_width=True):
-            pdf_data = criar_pdf_relatorio(df_pdf, tit_doc)
-            st.download_button(
-                label="📥 Clique Aqui para Baixar o PDF",
-                data=pdf_data,
-                file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
+        # Prepara o arquivo diretamente sem usar 'if st.button()'
+        pdf_bytes = criar_pdf_relatorio(df_pdf, tit_doc)
+        
+        st.download_button(
+            label="📥 Baixar Relatório PDF",
+            data=pdf_bytes,
+            file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
 
 # ABA 5: CONFIGURAÇÕES
 with aba5:
