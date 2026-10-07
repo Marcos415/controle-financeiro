@@ -140,7 +140,7 @@ def formata_brl(valor):
     except Exception:
         return "R$ 0,00"
 
-# --- CLASSE DE GERAÇÃO DE PDF ---
+# --- CLASSE DE GERAÇÃO DE PDF SEPARADA ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -151,25 +151,25 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', ln=True)
+        self.cell(0, 6, 'RELATORIO DE CONTROLE FINANCEIRO', align='C', ln=True)
         self.set_font('Helvetica', 'I', 9)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', ln=True)
+        self.cell(0, 5, f'Periodo: {self.titulo_periodo}', align='C', ln=True)
         self.ln(8)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y às %H:%M")} | Página {self.page_no()}/{{nb}}', align='C')
+        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y")} | Pagina {self.page_no()}', align='C')
 
-def gerar_pdf_bytes(df_periodo, titulo_periodo):
+def criar_pdf_relatorio(df_periodo, titulo_periodo):
     pdf = RelatorioPDF(titulo_periodo)
     pdf.alias_nb_pages()
     pdf.add_page()
     
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=True)
+    pdf.cell(0, 7, 'DETALHAMENTO DOS LANCAMENTOS', ln=True)
     pdf.ln(1)
 
     pdf.set_font('Helvetica', 'B', 8)
@@ -177,7 +177,7 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo):
     pdf.set_text_color(255, 255, 255)
     
     larguras = [22, 68, 35, 18, 27, 20]
-    colunas = ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor', 'Status']
+    colunas = ['Data', 'Descricao', 'Categoria', 'Tipo', 'Valor', 'Status']
     
     for idx, col in enumerate(colunas):
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
@@ -195,21 +195,27 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo):
             data_str = str(row['data']) if pd.notna(row['data']) else ""
             
         valor_str = formata_brl(row['valor'])
+        
         pdf.set_fill_color(248, 249, 250) if fill else pdf.set_fill_color(255, 255, 255)
         
+        desc = str(row['descricao']) if pd.notna(row['descricao']) else ""
+        cat = str(row['categoria']) if pd.notna(row['categoria']) else ""
+        tp = str(row['tipo']) if pd.notna(row['tipo']) else ""
+        st_val = str(row['status']) if pd.notna(row['status']) else ""
+
         pdf.cell(larguras[0], 6.5, data_str, border=1, align='C', fill=fill)
-        pdf.cell(larguras[1], 6.5, str(row['descricao'])[:36] if pd.notna(row['descricao']) else "", border=1, align='L', fill=fill)
-        pdf.cell(larguras[2], 6.5, str(row['categoria'])[:20] if pd.notna(row['categoria']) else "", border=1, align='L', fill=fill)
-        pdf.cell(larguras[3], 6.5, str(row['tipo']) if pd.notna(row['tipo']) else "", border=1, align='C', fill=fill)
+        pdf.cell(larguras[1], 6.5, desc[:35], border=1, align='L', fill=fill)
+        pdf.cell(larguras[2], 6.5, cat[:18], border=1, align='L', fill=fill)
+        pdf.cell(larguras[3], 6.5, tp, border=1, align='C', fill=fill)
         pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
-        pdf.cell(larguras[5], 6.5, str(row['status']) if pd.notna(row['status']) else "", border=1, align='C', fill=fill)
+        pdf.cell(larguras[5], 6.5, st_val, border=1, align='C', fill=fill)
         pdf.ln()
         
         fill = not fill
 
     output = pdf.output(dest='S')
     if isinstance(output, str):
-        return output.encode('latin1')
+        return output.encode('latin1', errors='ignore')
     return bytes(output)
 
 # --- INTERFACE PRINCIPAL ---
@@ -455,22 +461,24 @@ with aba4:
 
         st.subheader("📋 Detalhamento em Tabela")
         
-        # Prevenção rigorosa de Nones na visualização
-        df_display_pdf = df_pdf[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
-        df_display_pdf['data'] = df_display_pdf['data'].dt.strftime('%d/%m/%Y').fillna('')
-        df_display_pdf['valor'] = df_display_pdf['valor'].apply(formata_brl)
-        df_display_pdf = df_display_pdf.fillna('')
+        # Limpeza da tabela para exibição na tela sem gerar retornos nulos
+        df_display_pdf = pd.DataFrame()
+        df_display_pdf['Data'] = df_pdf['data'].dt.strftime('%d/%m/%Y')
+        df_display_pdf['Descrição'] = df_pdf['descricao']
+        df_display_pdf['Categoria'] = df_pdf['categoria']
+        df_display_pdf['Tipo'] = df_pdf['tipo']
+        df_display_pdf['Valor'] = df_pdf['valor'].apply(formata_brl)
+        df_display_pdf['Status'] = df_pdf['status']
         
         st.dataframe(df_display_pdf, use_container_width=True, hide_index=True)
 
         st.divider()
         
-        pdf_bytes = gerar_pdf_bytes(df_pdf, tit_doc)
-        
+        # Botão com função lazy de geração do PDF
         st.download_button(
             label="📥 Baixar Relatório PDF Formatado",
-            data=pdf_bytes,
-            file_name=f"relatorio_financeiro_{ano_pdf}_{tit_doc.replace(' ', '_')}.pdf",
+            data=criar_pdf_relatorio(df_pdf, tit_doc),
+            file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
