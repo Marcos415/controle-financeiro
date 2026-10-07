@@ -1,5 +1,3 @@
-import io
-import pandas as pd
 import streamlit as st
 import pandas as pd
 import psycopg2
@@ -150,7 +148,8 @@ class RelatorioPDF(FPDF):
 
 @st.cache_data(show_spinner=False)
 def gerar_bytes_pdf(df_json, titulo_periodo):
-    df_periodo = pd.read_json(df_json)
+    # Uso explícito de io.StringIO para ler a string JSON sem buscar arquivo em disco
+    df_periodo = pd.read_json(io.StringIO(df_json))
     pdf = RelatorioPDF(titulo_periodo)
     pdf.alias_nb_pages()
     pdf.add_page()
