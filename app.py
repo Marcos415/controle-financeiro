@@ -133,7 +133,12 @@ def excluir_lancamento(id_registro):
     conn.close()
 
 def formata_brl(valor):
-    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if pd.isna(valor) or valor is None:
+        return "R$ 0,00"
+    try:
+        return f"R$ {float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "R$ 0,00"
 
 # --- CLASSE DE GERAÇÃO DE PDF ---
 class RelatorioPDF(FPDF):
@@ -187,17 +192,17 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo):
         try:
             data_str = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
         except Exception:
-            data_str = str(row['data'])
+            data_str = str(row['data']) if pd.notna(row['data']) else ""
             
-        valor_str = formata_brl(float(row['valor']))
+        valor_str = formata_brl(row['valor'])
         pdf.set_fill_color(248, 249, 250) if fill else pdf.set_fill_color(255, 255, 255)
         
         pdf.cell(larguras[0], 6.5, data_str, border=1, align='C', fill=fill)
-        pdf.cell(larguras[1], 6.5, str(row['descricao'])[:36], border=1, align='L', fill=fill)
-        pdf.cell(larguras[2], 6.5, str(row['categoria'])[:20], border=1, align='L', fill=fill)
-        pdf.cell(larguras[3], 6.5, str(row['tipo']), border=1, align='C', fill=fill)
+        pdf.cell(larguras[1], 6.5, str(row['descricao'])[:36] if pd.notna(row['descricao']) else "", border=1, align='L', fill=fill)
+        pdf.cell(larguras[2], 6.5, str(row['categoria'])[:20] if pd.notna(row['categoria']) else "", border=1, align='L', fill=fill)
+        pdf.cell(larguras[3], 6.5, str(row['tipo']) if pd.notna(row['tipo']) else "", border=1, align='C', fill=fill)
         pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
-        pdf.cell(larguras[5], 6.5, str(row['status']), border=1, align='C', fill=fill)
+        pdf.cell(larguras[5], 6.5, str(row['status']) if pd.notna(row['status']) else "", border=1, align='C', fill=fill)
         pdf.ln()
         
         fill = not fill
@@ -260,12 +265,12 @@ with aba1:
         
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            anos_disponiveis = sorted(df['ano'].unique(), reverse=True)
+            anos_disponiveis = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
             ano_sel = st.selectbox("Selecione o Ano", anos_disponiveis, key="vg_ano")
         with col_f2:
             df_ano = df[df['ano'] == ano_sel]
-            meses_disp = sorted(df_ano['mes'].unique())
-            meses_opcoes = [meses_nome[m] for m in meses_disp]
+            meses_disp = sorted(df_ano['mes'].dropna().unique().astype(int))
+            meses_opcoes = [meses_nome[m] for m in meses_disp if m in meses_nome]
             mes_sel_nome = st.selectbox("Selecione o Mês", meses_opcoes, key="vg_mes")
             mes_sel = [k for k, v in meses_nome.items() if v == mes_sel_nome][0]
             
@@ -427,29 +432,44 @@ with aba4:
         with c_r1:
             opcao_periodo = st.radio("Filtro do Relatório", ["Mensal", "Anual"])
         with c_r2:
-            ano_pdf = st.selectbox("Ano", sorted(df['ano'].unique(), reverse=True), key="pdf_ano")
+            anos_pdf_disp = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
+            ano_pdf = st.selectbox("Ano", anos_pdf_disp, key="pdf_ano")
         with c_r3:
             if opcao_periodo == "Mensal":
                 df_ano_pdf = df[df['ano'] == ano_pdf]
-                meses_p = sorted(df_ano_pdf['mes'].unique())
-                mes_pdf_nome = st.selectbox("Mês", [meses_nome[m] for m in meses_p], key="pdf_mes")
-                mes_pdf = [k for k, v in meses_nome.items() if v == mes_pdf_nome][0]
+                meses_p = sorted(df_ano_pdf['mes'].dropna().unique().astype(int))
+                meses_p_opcoes = [meses_nome[m] for m in meses_p if m in meses_nome]
+                if meses_p_opcoes:
+                    mes_pdf_nome = st.selectbox("Mês", meses_p_opcoes, key="pdf_mes")
+                    mes_pdf = [k for k, v in meses_nome.items() if v == mes_pdf_nome][0]
+                else:
+                    mes_pdf_nome = "Janeiro"
+                    mes_pdf = 1
 
         if opcao_periodo == "Mensal":
-            df_pdf = df[(df['ano'] == ano_pdf) & (df['mes'] == mes_pdf)]
+            df_pdf = df[(df['ano'] == ano_pdf) & (df['mes'] == mes_pdf)].copy()
             tit_doc = f"{mes_pdf_nome} de {ano_pdf}"
         else:
-            df_pdf = df[df['ano'] == ano_pdf]
+            df_pdf = df[df['ano'] == ano_pdf].copy()
             tit_doc = f"Ano Completo {ano_pdf}"
 
         st.subheader("📋 Detalhamento em Tabela")
-        st.dataframe(df_pdf[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']], use_container_width=True, hide_index=True)
+        
+        # Prevenção rigorosa de Nones na visualização
+        df_display_pdf = df_pdf[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
+        df_display_pdf['data'] = df_display_pdf['data'].dt.strftime('%d/%m/%Y').fillna('')
+        df_display_pdf['valor'] = df_display_pdf['valor'].apply(formata_brl)
+        df_display_pdf = df_display_pdf.fillna('')
+        
+        st.dataframe(df_display_pdf, use_container_width=True, hide_index=True)
 
         st.divider()
         
+        pdf_bytes = gerar_pdf_bytes(df_pdf, tit_doc)
+        
         st.download_button(
             label="📥 Baixar Relatório PDF Formatado",
-            data=gerar_pdf_bytes(df_pdf, tit_doc),
+            data=pdf_bytes,
             file_name=f"relatorio_financeiro_{ano_pdf}_{tit_doc.replace(' ', '_')}.pdf",
             mime="application/pdf",
             use_container_width=True
