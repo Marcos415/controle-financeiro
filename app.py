@@ -7,6 +7,8 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 import google.generativeai as genai
+import io
+from gtts import gTTS
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -108,7 +110,7 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     pdf.alias_nb_pages()
     pdf.add_page()
     
-    # Tabela com o Detalhamento dos Lançamentos
+    # Detalhamento dos Lançamentos (Tabela única sem duplicidade)
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
     pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
@@ -152,6 +154,7 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     if isinstance(output, str):
         return output.encode('latin1')
     return bytes(output)
+
 # --- INTERFACE PRINCIPAL ---
 st.title("📊 Controle Financeiro Pessoal")
 
@@ -268,7 +271,7 @@ with aba2:
             st.success(f"Registro #{id_excluir} excluído com sucesso!")
             st.rerun()
 
-# ABA 3: ASSISTENTE IA
+# ABA 3: ASSISTENTE IA (COM ÁUDIO / TTS)
 with aba3:
     st.subheader("🤖 Consultar IA sobre Finanças")
     if "GEMINI_API_KEY" in st.secrets:
@@ -280,7 +283,7 @@ with aba3:
                 contexto_dados = df.to_csv(index=False)
                 prompt_completo = f"""
                 Você é um consultor financeiro pessoal especialista.
-                Analise os dados financeiros abaixo do usuário em formato CSV e responda à pergunta.
+                Analise os dados financeiros abaixo do usuário em formato CSV e responda à pergunta de forma clara e objetiva.
                 
                 Dados Financeiros:
                 {contexto_dados}
@@ -288,21 +291,31 @@ with aba3:
                 Pergunta do Usuário: {prompt_user}
                 """
                 with st.spinner("Analisando seus dados..."):
+                    texto_resposta = None
                     try:
-                        # Utiliza a versão recomendada do modelo Gemini
                         model = genai.GenerativeModel('gemini-2.5-flash')
                         resposta = model.generate_content(prompt_completo)
-                        st.markdown("### Resposta do Consultor:")
-                        st.write(resposta.text)
+                        texto_resposta = resposta.text
                     except Exception as e:
-                        # Fallback para gemini-2.0-flash caso o modelo acima não esteja ativo na sua conta
                         try:
                             model = genai.GenerativeModel('gemini-2.0-flash')
                             resposta = model.generate_content(prompt_completo)
-                            st.markdown("### Resposta do Consultor:")
-                            st.write(resposta.text)
+                            texto_resposta = resposta.text
                         except Exception as err:
                             st.error(f"Erro ao comunicar com a API do Gemini: {err}")
+
+                    if texto_resposta:
+                        st.markdown("### Resposta do Consultor:")
+                        st.write(texto_resposta)
+                        
+                        # GERAR E EXIBIR O PLAYER DE ÁUDIO
+                        try:
+                            tts = gTTS(text=texto_resposta, lang='pt', tld='com.br')
+                            sound_file = io.BytesIO()
+                            tts.write_to_fp(sound_file)
+                            st.audio(sound_file, format='audio/mp3')
+                        except Exception as e_audio:
+                            st.warning(f"Não foi possível gerar o áudio: {e_audio}")
             else:
                 st.warning("Escreva uma pergunta primeiro.")
     else:
