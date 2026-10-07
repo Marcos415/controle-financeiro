@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import psycopg2
-from psycopg2.extras import RealDictCursor
 import plotly.express as px
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
@@ -17,7 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- ESTILIZAÇÃO E CSS CUSTOMIZADO ---
+# --- ESTILIZAÇÃO CSS CUSTOMIZADA ---
 st.markdown("""
 <style>
     .main {
@@ -52,30 +51,15 @@ st.markdown("""
         font-weight: 700;
         color: #2c3e50;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 48px;
-        white-space: pre-wrap;
-        border-radius: 8px;
-        padding: 10px 16px;
-        font-weight: 600;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #1f4e79 !important;
-        color: white !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONEXÃO COM O BANCO DE DADOS (POSTGRESQL / NEON) ---
+# --- BANCO DE DADOS ---
 def get_db_connection():
     try:
-        conn = psycopg2.connect(st.secrets["DATABASE_URL"])
-        return conn
+        return psycopg2.connect(st.secrets["DATABASE_URL"])
     except Exception as e:
-        st.error(f"Erro ao conectar ao banco de dados: {e}")
+        st.error(f"Erro de conexão com o banco de dados: {e}")
         st.stop()
 
 def init_db():
@@ -98,7 +82,7 @@ def init_db():
 
 init_db()
 
-# --- FUNÇÕES DE MANIPULAÇÃO DE DADOS ---
+# --- FUNÇÕES UTILITÁRIAS ---
 def carregar_dados():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM financas ORDER BY data DESC, id DESC", conn)
@@ -140,7 +124,7 @@ def formata_brl(valor):
     except Exception:
         return "R$ 0,00"
 
-# --- CLASSE DE GERAÇÃO DE PDF SEPARADA ---
+# --- CLASSE E GERAÇÃO DO PDF (ISOLADA DE QUALQUER ST.WRITE) ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -179,6 +163,7 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
     larguras = [22, 68, 35, 18, 27, 20]
     colunas = ['Data', 'Descricao', 'Categoria', 'Tipo', 'Valor', 'Status']
     
+    # LAÇO TRADICIONAL (SEM COMPREHENSION)
     for idx, col in enumerate(colunas):
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
         pdf.cell(larguras[idx], 7, col, fill=True, border=1, align=align)
@@ -188,6 +173,7 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
     pdf.set_text_color(0, 0, 0)
     
     fill = False
+    # LAÇO TRADICIONAL
     for _, row in df_periodo.iterrows():
         try:
             data_str = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
@@ -195,7 +181,6 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
             data_str = str(row['data']) if pd.notna(row['data']) else ""
             
         valor_str = formata_brl(row['valor'])
-        
         pdf.set_fill_color(248, 249, 250) if fill else pdf.set_fill_color(255, 255, 255)
         
         desc = str(row['descricao']) if pd.notna(row['descricao']) else ""
@@ -210,7 +195,6 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
         pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
         pdf.cell(larguras[5], 6.5, st_val, border=1, align='C', fill=fill)
         pdf.ln()
-        
         fill = not fill
 
     output = pdf.output(dest='S')
@@ -218,12 +202,11 @@ def criar_pdf_relatorio(df_periodo, titulo_periodo):
         return output.encode('latin1', errors='ignore')
     return bytes(output)
 
-# --- INTERFACE PRINCIPAL ---
+# --- APLICAÇÃO PRINCIPAL ---
 st.title("📊 Controle Financeiro Pessoal")
-
 df = carregar_dados()
 
-# BARRA LATERAL - NOVO LANÇAMENTO
+# MENU LATERAL
 st.sidebar.header("➕ Novo Lançamento")
 with st.sidebar.form("form_lancamento", clear_on_submit=True):
     data_input = st.date_input("Data Inicial", datetime.today())
@@ -240,13 +223,13 @@ with st.sidebar.form("form_lancamento", clear_on_submit=True):
     submetido = st.form_submit_button("💾 Salvar Lançamento", use_container_width=True)
     if submetido:
         if desc_input.strip() == "":
-            st.sidebar.error("Por favor, preencha a descrição.")
+            st.sidebar.error("Preencha a descrição.")
         else:
             salvar_lancamento(data_input, desc_input, cat_input, tipo_input, valor_input, status_input, parcelas_input)
-            st.sidebar.success("Lançamento(s) salvo(s) com sucesso!")
+            st.sidebar.success("Lançamento salvo!")
             st.rerun()
 
-# ABAS DA APLICAÇÃO
+# ABAS
 aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "📈 Visão Geral", 
     "📝 Gerenciar Registros", 
@@ -264,16 +247,16 @@ meses_nome = {
 with aba1:
     st.subheader("Painel Geral")
     if df.empty:
-        st.info("Nenhum lançamento cadastrado até o momento.")
+        st.info("Nenhum lançamento cadastrado.")
     else:
         df['ano'] = df['data'].dt.year
         df['mes'] = df['data'].dt.month
         
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            anos_disponiveis = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
-            ano_sel = st.selectbox("Selecione o Ano", anos_disponiveis, key="vg_ano")
-        with col_f2:
+        c_f1, c_f2 = st.columns(2)
+        with c_f1:
+            anos_disp = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
+            ano_sel = st.selectbox("Selecione o Ano", anos_disp, key="vg_ano")
+        with c_f2:
             df_ano = df[df['ano'] == ano_sel]
             meses_disp = sorted(df_ano['mes'].dropna().unique().astype(int))
             meses_opcoes = [meses_nome[m] for m in meses_disp if m in meses_nome]
@@ -288,54 +271,23 @@ with aba1:
         pendente = df_filtrado[df_filtrado['status'] == 'Pendente']['valor'].sum()
         
         m1, m2, m3, m4 = st.columns(4)
-        with m1:
-            st.markdown(f"""
-            <div class="kpi-card kpi-card-entrada">
-                <div class="kpi-title">💵 Entradas</div>
-                <div class="kpi-value">{formata_brl(ent)}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m2:
-            st.markdown(f"""
-            <div class="kpi-card kpi-card-saida">
-                <div class="kpi-title">💸 Saídas</div>
-                <div class="kpi-value">{formata_brl(sai)}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m3:
-            st.markdown(f"""
-            <div class="kpi-card kpi-card-saldo">
-                <div class="kpi-title">🏦 Saldo Líquido</div>
-                <div class="kpi-value">{formata_brl(saldo)}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with m4:
-            st.markdown(f"""
-            <div class="kpi-card kpi-card-pendente">
-                <div class="kpi-title">⏳ A Receber / Pagar</div>
-                <div class="kpi-value">{formata_brl(pendente)}</div>
-            </div>
-            """, unsafe_allow_html=True)
+        m1.markdown(f'<div class="kpi-card kpi-card-entrada"><div class="kpi-title">💵 Entradas</div><div class="kpi-value">{formata_brl(ent)}</div></div>', unsafe_allow_html=True)
+        m2.markdown(f'<div class="kpi-card kpi-card-saida"><div class="kpi-title">💸 Saídas</div><div class="kpi-value">{formata_brl(sai)}</div></div>', unsafe_allow_html=True)
+        m3.markdown(f'<div class="kpi-card kpi-card-saldo"><div class="kpi-title">🏦 Saldo Líquido</div><div class="kpi-value">{formata_brl(saldo)}</div></div>', unsafe_allow_html=True)
+        m4.markdown(f'<div class="kpi-card kpi-card-pendente"><div class="kpi-title">⏳ A Receber / Pagar</div><div class="kpi-value">{formata_brl(pendente)}</div></div>', unsafe_allow_html=True)
         
         st.divider()
-        c_g1, c_g2 = st.columns(2)
-        with c_g1:
+        cg1, cg2 = st.columns(2)
+        with cg1:
             st.subheader("Despesas por Categoria")
             df_saida = df_filtrado[df_filtrado['tipo'] == 'Saída']
             if not df_saida.empty:
-                fig_cat = px.pie(
-                    df_saida, 
-                    names='categoria', 
-                    values='valor', 
-                    hole=0.45,
-                    color_discrete_sequence=px.colors.qualitative.Pastel
-                )
-                fig_cat.update_layout(margin=dict(t=20, b=20, l=20, r=20))
+                fig_cat = px.pie(df_saida, names='categoria', values='valor', hole=0.45)
                 st.plotly_chart(fig_cat, use_container_width=True)
             else:
-                st.write("Sem saídas registradas neste período.")
+                st.write("Sem saídas no período.")
                 
-        with c_g2:
+        with cg2:
             st.subheader("Entradas vs Saídas")
             if not df_filtrado.empty:
                 fig_bar = px.bar(
@@ -343,23 +295,24 @@ with aba1:
                     x='tipo', y='valor', color='tipo',
                     color_discrete_map={'Entrada': '#2ecc71', 'Saída': '#e74c3c'}
                 )
-                fig_bar.update_layout(
-                    showlegend=False, 
-                    xaxis_title=None, 
-                    yaxis_title="Valor (R$)",
-                    margin=dict(t=20, b=20, l=20, r=20)
-                )
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-# ABA 2: GERENCIAR REGISTROS
+# ABA 2: GERENCIAR
 with aba2:
     st.subheader("Lançamentos Registrados")
     if df.empty:
         st.info("Nenhum dado encontrado.")
     else:
-        df_exibir = df[['id', 'data', 'descricao', 'categoria', 'tipo', 'valor', 'status']].copy()
-        df_exibir['data'] = df_exibir['data'].dt.strftime('%d/%m/%Y')
-        df_exibir['valor'] = df_exibir['valor'].apply(formata_brl)
+        # CONSTRUÇÃO DIRETA DO DATAFRAME SEM LAÇOS SOLTOS
+        df_exibir = pd.DataFrame({
+            'ID': df['id'],
+            'Data': df['data'].dt.strftime('%d/%m/%Y'),
+            'Descrição': df['descricao'],
+            'Categoria': df['categoria'],
+            'Tipo': df['tipo'],
+            'Valor': df['valor'].apply(formata_brl),
+            'Status': df['status']
+        })
         
         st.dataframe(df_exibir, use_container_width=True, hide_index=True)
         
@@ -367,86 +320,66 @@ with aba2:
         st.subheader("🗑️ Excluir Lançamento")
         col_e1, col_e2 = st.columns([3, 1])
         with col_e1:
-            id_excluir = st.number_input("Digite o ID do lançamento que deseja remover:", min_value=1, step=1)
+            id_excluir = st.number_input("Digite o ID do lançamento:", min_value=1, step=1)
         with col_e2:
             st.write("")
             st.write("")
             if st.button("Confirmar Exclusão", use_container_width=True):
                 excluir_lancamento(id_excluir)
-                st.success(f"Registro #{id_excluir} excluído com sucesso!")
+                st.success(f"Registro #{id_excluir} excluído!")
                 st.rerun()
 
-# ABA 3: ASSISTENTE IA (COM ÁUDIO / TTS)
+# ABA 3: IA
 with aba3:
     st.subheader("🤖 Consultar IA sobre Finanças")
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        
-        prompt_user = st.text_area("Faça uma pergunta sobre a sua situação financeira atual:", placeholder="Exemplo: Como posso otimizar minhas despesas este mês?")
-        if st.button("💡 Analisar com Inteligência Artificial"):
+        prompt_user = st.text_area("Faça uma pergunta sobre a sua situação financeira:")
+        if st.button("💡 Analisar com IA"):
             if prompt_user.strip() != "":
                 contexto_dados = df.to_csv(index=False)
-                prompt_completo = f"""
-                Você é um consultor financeiro pessoal especialista.
-                Analise os dados financeiros abaixo do usuário em formato CSV e responda à pergunta de forma clara e objetiva.
-                
-                Dados Financeiros:
-                {contexto_dados}
-                
-                Pergunta do Usuário: {prompt_user}
-                """
-                with st.spinner("Analisando seus dados..."):
-                    texto_resposta = None
+                prompt_completo = f"Analise as finanças:\n{contexto_dados}\nPergunta: {prompt_user}"
+                with st.spinner("Analisando..."):
                     try:
                         model = genai.GenerativeModel('gemini-2.5-flash')
                         resposta = model.generate_content(prompt_completo)
-                        texto_resposta = resposta.text
-                    except Exception as e:
-                        try:
-                            model = genai.GenerativeModel('gemini-2.0-flash')
-                            resposta = model.generate_content(prompt_completo)
-                            texto_resposta = resposta.text
-                        except Exception as err:
-                            st.error(f"Erro ao comunicar com a API do Gemini: {err}")
-
-                    if texto_resposta:
-                        st.markdown("### Resposta do Consultor:")
-                        st.write(texto_resposta)
+                        txt = resposta.text
+                        st.markdown("### Resposta:")
+                        st.write(txt)
                         
-                        try:
-                            tts = gTTS(text=texto_resposta, lang='pt', tld='com.br')
-                            sound_file = io.BytesIO()
-                            tts.write_to_fp(sound_file)
-                            st.audio(sound_file, format='audio/mp3')
-                        except Exception as e_audio:
-                            st.warning(f"Não foi possível gerar o áudio: {e_audio}")
+                        tts = gTTS(text=txt, lang='pt', tld='com.br')
+                        sound_file = io.BytesIO()
+                        tts.write_to_fp(sound_file)
+                        st.audio(sound_file, format='audio/mp3')
+                    except Exception as e:
+                        st.error(f"Erro na IA: {e}")
             else:
-                st.warning("Escreva uma pergunta primeiro.")
+                st.warning("Escreva uma pergunta.")
     else:
-        st.warning("Adicione a chave GEMINI_API_KEY nos Secrets do Streamlit para usar esta função.")
+        st.warning("Chave GEMINI_API_KEY não configurada nos secrets.")
 
 # ABA 4: RELATÓRIOS PDF
 with aba4:
     st.subheader("📋 Gerar e Baixar Relatório PDF")
     if df.empty:
-        st.info("Não existem registros para gerar relatórios.")
+        st.info("Sem dados para relatório.")
     else:
         df['ano'] = df['data'].dt.year
         df['mes'] = df['data'].dt.month
         
-        c_r1, c_r2, c_r3 = st.columns(3)
-        with c_r1:
-            opcao_periodo = st.radio("Filtro do Relatório", ["Mensal", "Anual"])
-        with c_r2:
-            anos_pdf_disp = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
-            ano_pdf = st.selectbox("Ano", anos_pdf_disp, key="pdf_ano")
-        with c_r3:
+        cr1, cr2, cr3 = st.columns(3)
+        with cr1:
+            opcao_periodo = st.radio("Filtro", ["Mensal", "Anual"])
+        with cr2:
+            anos_p = sorted(df['ano'].dropna().unique().astype(int), reverse=True)
+            ano_pdf = st.selectbox("Ano", anos_p, key="pdf_ano")
+        with cr3:
             if opcao_periodo == "Mensal":
-                df_ano_pdf = df[df['ano'] == ano_pdf]
-                meses_p = sorted(df_ano_pdf['mes'].dropna().unique().astype(int))
-                meses_p_opcoes = [meses_nome[m] for m in meses_p if m in meses_nome]
-                if meses_p_opcoes:
-                    mes_pdf_nome = st.selectbox("Mês", meses_p_opcoes, key="pdf_mes")
+                df_ano_p = df[df['ano'] == ano_pdf]
+                meses_p = sorted(df_ano_p['mes'].dropna().unique().astype(int))
+                meses_opc = [meses_nome[m] for m in meses_p if m in meses_nome]
+                if meses_opc:
+                    mes_pdf_nome = st.selectbox("Mês", meses_opc, key="pdf_mes")
                     mes_pdf = [k for k, v in meses_nome.items() if v == mes_pdf_nome][0]
                 else:
                     mes_pdf_nome = "Janeiro"
@@ -459,34 +392,34 @@ with aba4:
             df_pdf = df[df['ano'] == ano_pdf].copy()
             tit_doc = f"Ano Completo {ano_pdf}"
 
-        st.subheader("📋 Detalhamento em Tabela")
+        st.subheader("📋 Tabela do Relatório")
         
-        # Formatação direta sem retornos soltos
-        df_display_pdf = pd.DataFrame()
-        df_display_pdf['Data'] = df_pdf['data'].dt.strftime('%d/%m/%Y')
-        df_display_pdf['Descrição'] = df_pdf['descricao']
-        df_display_pdf['Categoria'] = df_pdf['categoria']
-        df_display_pdf['Tipo'] = df_pdf['tipo']
-        df_display_pdf['Valor'] = df_pdf['valor'].apply(formata_brl)
-        df_display_pdf['Status'] = df_pdf['status']
+        # TABELA TOTALMENTE VETORIZADA SEM ITERAÇÃO DIRETA
+        df_tabela_pdf = pd.DataFrame({
+            'Data': df_pdf['data'].dt.strftime('%d/%m/%Y'),
+            'Descrição': df_pdf['descricao'],
+            'Categoria': df_pdf['categoria'],
+            'Tipo': df_pdf['tipo'],
+            'Valor': df_pdf['valor'].apply(formata_brl),
+            'Status': df_pdf['status']
+        })
         
-        st.dataframe(df_display_pdf, use_container_width=True, hide_index=True)
-
+        st.dataframe(df_tabela_pdf, use_container_width=True, hide_index=True)
         st.divider()
-        
-        # Geração isolada do ficheiro PDF em bytes
-        bytes_pdf = criar_pdf_relatorio(df_pdf, tit_doc)
-        
-        st.download_button(
-            label="📥 Baixar Relatório PDF Formatado",
-            data=bytes_pdf,
-            file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+
+        # BOTÃO COM GERAÇÃO SOB DEMANDA
+        if st.button("🔄 Gerar Arquivo PDF", use_container_width=True):
+            pdf_data = criar_pdf_relatorio(df_pdf, tit_doc)
+            st.download_button(
+                label="📥 Clique Aqui para Baixar o PDF",
+                data=pdf_data,
+                file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
 # ABA 5: CONFIGURAÇÕES
 with aba5:
-    st.subheader("⚙️ Status e Diagnóstico")
-    st.success("Conexão com PostgreSQL (Neon) Ativa e Operacional.")
-    st.write(f"Total de registros na base de dados: **{len(df)}**")
+    st.subheader("⚙️ Status do Sistema")
+    st.success("Conexão ativa com o banco PostgreSQL.")
+    st.write(f"Total de registros armazenados: **{len(df)}**")
