@@ -20,18 +20,13 @@ st.set_page_config(
 # --- ESTILIZAÇÃO E CSS CUSTOMIZADO ---
 st.markdown("""
 <style>
-    /* Estilo do fundo e fontes gerais */
     .main {
         background-color: #f8f9fa;
     }
-    
-    /* Títulos e Cabeçalhos */
     h1, h2, h3 {
         color: #1f4e79 !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
-
-    /* Cartões de Métricas Customizados (KPIs) */
     .kpi-card {
         background-color: #ffffff;
         border-radius: 12px;
@@ -57,8 +52,6 @@ st.markdown("""
         font-weight: 700;
         color: #2c3e50;
     }
-
-    /* Estilização das Abas (Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
@@ -153,9 +146,9 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', ln=1)
+        self.cell(0, 6, 'RELATÓRIO DE CONTROLE FINANCEIRO', align='C', new_x="LMARGIN", new_y="NEXT")
         self.set_font('Helvetica', 'I', 9)
-        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', ln=1)
+        self.cell(0, 5, f'Período: {self.titulo_periodo}', align='C', new_x="LMARGIN", new_y="NEXT")
         self.ln(8)
 
     def footer(self):
@@ -171,7 +164,7 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
+    pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(1)
 
     pdf.set_font('Helvetica', 'B', 8)
@@ -183,8 +176,11 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     
     for idx, col in enumerate(colunas):
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
-        pdf.cell(larguras[idx], 7, col, fill=True, border=1, align=align)
-    pdf.ln()
+        proxima = (idx == len(colunas) - 1)
+        if proxima:
+            pdf.cell(larguras[idx], 7, col, fill=True, border=1, align=align, new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.cell(larguras[idx], 7, col, fill=True, border=1, align=align)
 
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(0, 0, 0)
@@ -204,11 +200,11 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
         pdf.cell(larguras[2], 6.5, str(row['categoria'])[:20], border=1, align='L', fill=fill)
         pdf.cell(larguras[3], 6.5, str(row['tipo']), border=1, align='C', fill=fill)
         pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
-        pdf.cell(larguras[5], 6.5, str(row['status']), border=1, align='C', fill=fill)
-        pdf.ln()
+        pdf.cell(larguras[5], 6.5, str(row['status']), border=1, align='C', fill=fill, new_x="LMARGIN", new_y="NEXT")
+        
         fill = not fill
 
-    output = pdf.output(dest='S')
+    output = pdf.output()
     if isinstance(output, str):
         return output.encode('latin1')
     return bytes(output)
@@ -282,7 +278,6 @@ with aba1:
         saldo = ent - sai
         pendente = df_filtrado[df_filtrado['status'] == 'Pendente']['valor'].sum()
         
-        # EXIBIÇÃO EM CARTÕES PERSONALIZADOS (KPIs Visualmente Mais Elegantes)
         m1, m2, m3, m4 = st.columns(4)
         with m1:
             st.markdown(f"""
