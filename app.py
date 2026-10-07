@@ -124,7 +124,7 @@ def formata_brl(valor):
     except Exception:
         return "R$ 0,00"
 
-# --- CLASSE E GERAÇÃO DO PDF (ISOLADA DE MAGIC COMMANDS) ---
+# --- CLASSE E GERAÇÃO DO PDF ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -135,29 +135,26 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        _ = self.cell(0, 6, 'RELATORIO DE CONTROLE FINANCEIRO', align='C', ln=True)
+        self.cell(0, 6, 'RELATORIO DE CONTROLE FINANCEIRO', align='C', ln=True)
         self.set_font('Helvetica', 'I', 9)
-        _ = self.cell(0, 5, f'Periodo: {self.titulo_periodo}', align='C', ln=True)
-        _ = self.ln(8)
+        self.cell(0, 5, f'Periodo: {self.titulo_periodo}', align='C', ln=True)
+        self.ln(8)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 8)
         self.set_text_color(128, 128, 128)
-        _ = self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y")} | Pagina {self.page_no()}', align='C')
+        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y")} | Pagina {self.page_no()}', align='C')
 
-@st.cache_data(show_spinner=False)
-def gerar_bytes_pdf(df_json, titulo_periodo):
-    # Uso explícito de io.StringIO para ler a string JSON sem buscar arquivo em disco
-    df_periodo = pd.read_json(io.StringIO(df_json))
+def construir_pdf(df_periodo, titulo_periodo):
     pdf = RelatorioPDF(titulo_periodo)
     pdf.alias_nb_pages()
     pdf.add_page()
     
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
-    _ = pdf.cell(0, 7, 'DETALHAMENTO DOS LANCAMENTOS', ln=True)
-    _ = pdf.ln(1)
+    pdf.cell(0, 7, 'DETALHAMENTO DOS LANCAMENTOS', ln=True)
+    pdf.ln(1)
 
     pdf.set_font('Helvetica', 'B', 8)
     pdf.set_fill_color(31, 78, 121)
@@ -170,8 +167,8 @@ def gerar_bytes_pdf(df_json, titulo_periodo):
         col = colunas[i]
         w = larguras[i]
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
-        _ = pdf.cell(w, 7, col, fill=True, border=1, align=align)
-    _ = pdf.ln()
+        pdf.cell(w, 7, col, fill=True, border=1, align=align)
+    pdf.ln()
 
     pdf.set_font('Helvetica', '', 8)
     pdf.set_text_color(0, 0, 0)
@@ -191,13 +188,13 @@ def gerar_bytes_pdf(df_json, titulo_periodo):
         tp = str(row['tipo']) if pd.notna(row['tipo']) else ""
         st_val = str(row['status']) if pd.notna(row['status']) else ""
 
-        _ = pdf.cell(larguras[0], 6.5, data_str, border=1, align='C', fill=fill)
-        _ = pdf.cell(larguras[1], 6.5, desc[:35], border=1, align='L', fill=fill)
-        _ = pdf.cell(larguras[2], 6.5, cat[:18], border=1, align='L', fill=fill)
-        _ = pdf.cell(larguras[3], 6.5, tp, border=1, align='C', fill=fill)
-        _ = pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
-        _ = pdf.cell(larguras[5], 6.5, st_val, border=1, align='C', fill=fill)
-        _ = pdf.ln()
+        pdf.cell(larguras[0], 6.5, data_str, border=1, align='C', fill=fill)
+        pdf.cell(larguras[1], 6.5, desc[:35], border=1, align='L', fill=fill)
+        pdf.cell(larguras[2], 6.5, cat[:18], border=1, align='L', fill=fill)
+        pdf.cell(larguras[3], 6.5, tp, border=1, align='C', fill=fill)
+        pdf.cell(larguras[4], 6.5, valor_str, border=1, align='R', fill=fill)
+        pdf.cell(larguras[5], 6.5, st_val, border=1, align='C', fill=fill)
+        pdf.ln()
         fill = not fill
 
     out = pdf.output(dest='S')
@@ -408,16 +405,21 @@ with aba4:
         st.dataframe(df_tabela_pdf, use_container_width=True, hide_index=True)
         st.divider()
 
-        df_json = df_pdf.to_json()
-        pdf_bytes = gerar_bytes_pdf(df_json, tit_doc)
-        
-        st.download_button(
-            label="📥 Baixar Relatório PDF",
-            data=pdf_bytes,
-            file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+        # Botão para gerar o PDF em memória apenas quando solicitado
+        if st.button("🔨 Gerar Relatório PDF", use_container_width=True):
+            with st.spinner("Gerando arquivo PDF..."):
+                st.session_state["pdf_bytes"] = construir_pdf(df_pdf, tit_doc)
+                st.session_state["pdf_filename"] = f"relatorio_financeiro_{ano_pdf}.pdf"
+
+        # Exibe o botão de download apenas se o PDF já tiver sido gerado
+        if "pdf_bytes" in st.session_state and st.session_state["pdf_bytes"]:
+            st.download_button(
+                label="📥 Baixar Relatório PDF",
+                data=st.session_state["pdf_bytes"],
+                file_name=st.session_state.get("pdf_filename", "relatorio.pdf"),
+                mime="application/pdf",
+                use_container_width=True
+            )
 
 # ABA 5: CONFIGURAÇÕES
 with aba5:
