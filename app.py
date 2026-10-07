@@ -277,7 +277,6 @@ with aba3:
         prompt_user = st.text_area("Faça uma pergunta sobre a sua situação financeira atual:")
         if st.button("Analisar com Inteligência Artificial"):
             if prompt_user.strip() != "":
-                model = genai.GenerativeModel('gemini-1.5-flash')
                 contexto_dados = df.to_csv(index=False)
                 prompt_completo = f"""
                 Você é um consultor financeiro pessoal especialista.
@@ -289,9 +288,21 @@ with aba3:
                 Pergunta do Usuário: {prompt_user}
                 """
                 with st.spinner("Analisando seus dados..."):
-                    resposta = model.generate_content(prompt_completo)
-                    st.markdown("### Resposta do Consultor:")
-                    st.write(resposta.text)
+                    try:
+                        # Utiliza a versão recomendada do modelo Gemini
+                        model = genai.GenerativeModel('gemini-2.5-flash')
+                        resposta = model.generate_content(prompt_completo)
+                        st.markdown("### Resposta do Consultor:")
+                        st.write(resposta.text)
+                    except Exception as e:
+                        # Fallback para gemini-2.0-flash caso o modelo acima não esteja ativo na sua conta
+                        try:
+                            model = genai.GenerativeModel('gemini-2.0-flash')
+                            resposta = model.generate_content(prompt_completo)
+                            st.markdown("### Resposta do Consultor:")
+                            st.write(resposta.text)
+                        except Exception as err:
+                            st.error(f"Erro ao comunicar com a API do Gemini: {err}")
             else:
                 st.warning("Escreva uma pergunta primeiro.")
     else:
