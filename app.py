@@ -17,6 +17,65 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- ESTILIZAÇÃO E CSS CUSTOMIZADO ---
+st.markdown("""
+<style>
+    /* Estilo do fundo e fontes gerais */
+    .main {
+        background-color: #f8f9fa;
+    }
+    
+    /* Títulos e Cabeçalhos */
+    h1, h2, h3 {
+        color: #1f4e79 !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    /* Cartões de Métricas Customizados (KPIs) */
+    .kpi-card {
+        background-color: #ffffff;
+        border-radius: 12px;
+        padding: 18px 22px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        border-left: 5px solid #1f4e79;
+        margin-bottom: 10px;
+    }
+    .kpi-card-entrada { border-left-color: #2ecc71; }
+    .kpi-card-saida { border-left-color: #e74c3c; }
+    .kpi-card-saldo { border-left-color: #3498db; }
+    .kpi-card-pendente { border-left-color: #f39c12; }
+    
+    .kpi-title {
+        font-size: 0.85rem;
+        color: #7f8c8d;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+    }
+    .kpi-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #2c3e50;
+    }
+
+    /* Estilização das Abas (Tabs) */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 48px;
+        white-space: pre-wrap;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1f4e79 !important;
+        color: white !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- CONEXÃO COM O BANCO DE DADOS (POSTGRESQL / NEON) ---
 def get_db_connection():
     try:
@@ -83,7 +142,7 @@ def excluir_lancamento(id_registro):
 def formata_brl(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# --- CLASSE DE GERAÇÃO DE PDF (COMPATÍVEL COM FPDF1 E FPDF2) ---
+# --- CLASSE DE GERAÇÃO DE PDF ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -110,7 +169,6 @@ def gerar_pdf_bytes(df_periodo, titulo_periodo, total_ent, total_sai, saldo, abe
     pdf.alias_nb_pages()
     pdf.add_page()
     
-    # Detalhamento dos Lançamentos (Tabela única sem duplicidade)
     pdf.set_font('Helvetica', 'B', 10)
     pdf.set_text_color(31, 78, 121)
     pdf.cell(0, 7, 'DETALHAMENTO DOS LANÇAMENTOS', ln=1)
@@ -160,7 +218,7 @@ st.title("📊 Controle Financeiro Pessoal")
 
 df = carregar_dados()
 
-# BARRA LATERAL - NOVO LANÇAMENTO (COM PARCELAMENTO)
+# BARRA LATERAL - NOVO LANÇAMENTO
 st.sidebar.header("➕ Novo Lançamento")
 with st.sidebar.form("form_lancamento", clear_on_submit=True):
     data_input = st.date_input("Data Inicial", datetime.today())
@@ -174,7 +232,7 @@ with st.sidebar.form("form_lancamento", clear_on_submit=True):
     parcelas_input = st.number_input("Número de Parcelas", min_value=1, max_value=72, value=1, step=1)
     status_input = st.selectbox("Status da 1ª Parcela", ["Pago", "Pendente"])
     
-    submetido = st.form_submit_button("Salvar Lançamento")
+    submetido = st.form_submit_button("💾 Salvar Lançamento", use_container_width=True)
     if submetido:
         if desc_input.strip() == "":
             st.sidebar.error("Por favor, preencha a descrição.")
@@ -224,11 +282,36 @@ with aba1:
         saldo = ent - sai
         pendente = df_filtrado[df_filtrado['status'] == 'Pendente']['valor'].sum()
         
+        # EXIBIÇÃO EM CARTÕES PERSONALIZADOS (KPIs Visualmente Mais Elegantes)
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Entradas", formata_brl(ent))
-        m2.metric("Saídas", formata_brl(sai))
-        m3.metric("Saldo Líquido", formata_brl(saldo))
-        m4.metric("A Receber / Pagar", formata_brl(pendente))
+        with m1:
+            st.markdown(f"""
+            <div class="kpi-card kpi-card-entrada">
+                <div class="kpi-title">💵 Entradas</div>
+                <div class="kpi-value">{formata_brl(ent)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with m2:
+            st.markdown(f"""
+            <div class="kpi-card kpi-card-saida">
+                <div class="kpi-title">💸 Saídas</div>
+                <div class="kpi-value">{formata_brl(sai)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with m3:
+            st.markdown(f"""
+            <div class="kpi-card kpi-card-saldo">
+                <div class="kpi-title">🏦 Saldo Líquido</div>
+                <div class="kpi-value">{formata_brl(saldo)}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with m4:
+            st.markdown(f"""
+            <div class="kpi-card kpi-card-pendente">
+                <div class="kpi-title">⏳ A Receber / Pagar</div>
+                <div class="kpi-value">{formata_brl(pendente)}</div>
+            </div>
+            """, unsafe_allow_html=True)
         
         st.divider()
         c_g1, c_g2 = st.columns(2)
@@ -236,7 +319,14 @@ with aba1:
             st.subheader("Despesas por Categoria")
             df_saida = df_filtrado[df_filtrado['tipo'] == 'Saída']
             if not df_saida.empty:
-                fig_cat = px.pie(df_saida, names='categoria', values='valor', hole=0.4)
+                fig_cat = px.pie(
+                    df_saida, 
+                    names='categoria', 
+                    values='valor', 
+                    hole=0.45,
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig_cat.update_layout(margin=dict(t=20, b=20, l=20, r=20))
                 st.plotly_chart(fig_cat, use_container_width=True)
             else:
                 st.write("Sem saídas registradas neste período.")
@@ -247,7 +337,13 @@ with aba1:
                 fig_bar = px.bar(
                     df_filtrado.groupby('tipo')['valor'].sum().reset_index(),
                     x='tipo', y='valor', color='tipo',
-                    color_discrete_map={'Entrada': '#2ECC71', 'Saída': '#E74C3C'}
+                    color_discrete_map={'Entrada': '#2ecc71', 'Saída': '#e74c3c'}
+                )
+                fig_bar.update_layout(
+                    showlegend=False, 
+                    xaxis_title=None, 
+                    yaxis_title="Valor (R$)",
+                    margin=dict(t=20, b=20, l=20, r=20)
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -261,15 +357,20 @@ with aba2:
         df_exibir['data'] = df_exibir['data'].dt.strftime('%d/%m/%Y')
         df_exibir['valor'] = df_exibir['valor'].apply(formata_brl)
         
-        st.dataframe(df_exibir, use_container_width=True)
+        st.dataframe(df_exibir, use_container_width=True, hide_index=True)
         
         st.divider()
         st.subheader("🗑️ Excluir Lançamento")
-        id_excluir = st.number_input("Digite o ID do lançamento que deseja remover:", min_value=1, step=1)
-        if st.button("Confirmar Exclusão"):
-            excluir_lancamento(id_excluir)
-            st.success(f"Registro #{id_excluir} excluído com sucesso!")
-            st.rerun()
+        col_e1, col_e2 = st.columns([3, 1])
+        with col_e1:
+            id_excluir = st.number_input("Digite o ID do lançamento que deseja remover:", min_value=1, step=1)
+        with col_e2:
+            st.write("")
+            st.write("")
+            if st.button("Confirmar Exclusão", use_container_width=True):
+                excluir_lancamento(id_excluir)
+                st.success(f"Registro #{id_excluir} excluído com sucesso!")
+                st.rerun()
 
 # ABA 3: ASSISTENTE IA (COM ÁUDIO / TTS)
 with aba3:
@@ -277,8 +378,8 @@ with aba3:
     if "GEMINI_API_KEY" in st.secrets:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         
-        prompt_user = st.text_area("Faça uma pergunta sobre a sua situação financeira atual:")
-        if st.button("Analisar com Inteligência Artificial"):
+        prompt_user = st.text_area("Faça uma pergunta sobre a sua situação financeira atual:", placeholder="Exemplo: Como posso otimizar minhas despesas este mês?")
+        if st.button("💡 Analisar com Inteligência Artificial"):
             if prompt_user.strip() != "":
                 contexto_dados = df.to_csv(index=False)
                 prompt_completo = f"""
@@ -308,7 +409,6 @@ with aba3:
                         st.markdown("### Resposta do Consultor:")
                         st.write(texto_resposta)
                         
-                        # GERAR E EXIBIR O PLAYER DE ÁUDIO
                         try:
                             tts = gTTS(text=texto_resposta, lang='pt', tld='com.br')
                             sound_file = io.BytesIO()
@@ -355,7 +455,7 @@ with aba4:
         aberto_m = df_pdf[df_pdf['status'] == 'Pendente']['valor'].sum()
 
         st.subheader("📋 Detalhamento em Tabela")
-        st.dataframe(df_pdf[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']], use_container_width=True)
+        st.dataframe(df_pdf[['data', 'descricao', 'categoria', 'tipo', 'valor', 'status']], use_container_width=True, hide_index=True)
 
         st.divider()
         
