@@ -124,7 +124,7 @@ def formata_brl(valor):
     except Exception:
         return "R$ 0,00"
 
-# --- CLASSE E GERAÇÃO DO PDF ---
+# --- CLASSE DO PDF (ISOLADA DE IMPRESSÃO STREAMLIT) ---
 class RelatorioPDF(FPDF):
     def __init__(self, titulo_periodo):
         super().__init__(orientation='P', unit='mm', format='A4')
@@ -135,18 +135,19 @@ class RelatorioPDF(FPDF):
         self.rect(0, 0, 210, 22, 'F')
         self.set_font('Helvetica', 'B', 15)
         self.set_text_color(255, 255, 255)
-        self.cell(0, 6, 'RELATORIO DE CONTROLE FINANCEIRO', align='C', ln=True)
+        super().cell(0, 6, 'RELATORIO DE CONTROLE FINANCEIRO', align='C', ln=True)
         self.set_font('Helvetica', 'I', 9)
-        self.cell(0, 5, f'Periodo: {self.titulo_periodo}', align='C', ln=True)
-        self.ln(8)
+        super().cell(0, 5, f'Periodo: {self.titulo_periodo}', align='C', ln=True)
+        super().ln(8)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Helvetica', 'I', 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y")} | Pagina {self.page_no()}', align='C')
+        super().cell(0, 10, f'Gerado em {datetime.today().strftime("%d/%m/%Y")} | Pagina {self.page_no()}', align='C')
 
-def construir_pdf(df_periodo, titulo_periodo):
+def gerar_bytes_pdf(df_periodo, titulo_periodo):
+    # Isolamento de execução total sem comandos soltos que gerem Magic
     pdf = RelatorioPDF(titulo_periodo)
     pdf.alias_nb_pages()
     pdf.add_page()
@@ -163,8 +164,7 @@ def construir_pdf(df_periodo, titulo_periodo):
     larguras = [22, 68, 35, 18, 27, 20]
     colunas = ['Data', 'Descricao', 'Categoria', 'Tipo', 'Valor', 'Status']
     
-    for i in range(len(colunas)):
-        col = colunas[i]
+    for i, col in enumerate(colunas):
         w = larguras[i]
         align = 'R' if col == 'Valor' else ('C' if col in ['Data', 'Tipo', 'Status'] else 'L')
         pdf.cell(w, 7, col, fill=True, border=1, align=align)
@@ -405,13 +405,13 @@ with aba4:
         st.dataframe(df_tabela_pdf, use_container_width=True, hide_index=True)
         st.divider()
 
-        # Botão para gerar o PDF em memória apenas quando solicitado
+        # Botão para processar o PDF em memória sem vazar retornos para a tela
         if st.button("🔨 Gerar Relatório PDF", use_container_width=True):
             with st.spinner("Gerando arquivo PDF..."):
-                st.session_state["pdf_bytes"] = construir_pdf(df_pdf, tit_doc)
+                st.session_state["pdf_bytes"] = gerar_bytes_pdf(df_pdf, tit_doc)
                 st.session_state["pdf_filename"] = f"relatorio_financeiro_{ano_pdf}.pdf"
 
-        # Exibe o botão de download apenas se o PDF já tiver sido gerado
+        # Exibe o botão de download limpo sem gerar resíduos visuais
         if "pdf_bytes" in st.session_state and st.session_state["pdf_bytes"]:
             st.download_button(
                 label="📥 Baixar Relatório PDF",
