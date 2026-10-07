@@ -461,7 +461,7 @@ with aba4:
 
         st.subheader("📋 Detalhamento em Tabela")
         
-        # Limpeza da tabela para exibição na tela sem gerar retornos nulos
+        # Formatação direta sem retornos soltos
         df_display_pdf = pd.DataFrame()
         df_display_pdf['Data'] = df_pdf['data'].dt.strftime('%d/%m/%Y')
         df_display_pdf['Descrição'] = df_pdf['descricao']
@@ -474,10 +474,12 @@ with aba4:
 
         st.divider()
         
-        # Botão com função lazy de geração do PDF
+        # Geração isolada do ficheiro PDF em bytes
+        bytes_pdf = criar_pdf_relatorio(df_pdf, tit_doc)
+        
         st.download_button(
             label="📥 Baixar Relatório PDF Formatado",
-            data=criar_pdf_relatorio(df_pdf, tit_doc),
+            data=bytes_pdf,
             file_name=f"relatorio_financeiro_{ano_pdf}.pdf",
             mime="application/pdf",
             use_container_width=True
